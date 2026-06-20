@@ -29,6 +29,16 @@ The backend follows a very simple story to do its job:
 
 *Note: The backend never invents things! It only ever uses the facts it pulled from your original notes.*
 
+## High-Fidelity Pipeline Visualizations
+
+To demystify the agent's behavior and show how it operates in real-time, the frontend includes two data-driven visualizations powered directly by the backend's internal traces:
+
+1. **Live LangGraph Workflow Visualizer**: This flowchart animates the step-by-step progress of the backend pipeline. As the agent transitions through Analysis, Fact Retrieval, Response Drafting, and Self-Evaluation/Revision, the active node is highlighted in real-time. If a policy violation is triggered, the visualizer animates the revision loop back to the drafting stage.
+2. **Interactive Fact-Retrieval Map**: Located under the **Evidence** tab of the inspector panel, this map visualizes the exact facts retrieved and used during a conversation turn:
+   - **Retrieved Facts** are outlined, showing their exact search rank and relevance score.
+   - **Used Facts** are highlighted with solid backgrounds, showing they were injected into the final generated response.
+   - **Keyword Matching**: Hovering over matched terms highlights the exact facts they triggered in the retrieval phase.
+
 ## How to Get Started
 
 Getting the robot running on your computer is super easy! Just follow these steps:

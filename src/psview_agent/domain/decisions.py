@@ -49,7 +49,10 @@ class CandidateAnalysis(StrictModel):
     )
     @classmethod
     def normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
+        res = _normalize_list(value)
+        if isinstance(res, list):
+            return res[:8]
+        return res
 
     @model_validator(mode="after")
     def validate_opt_out_rules(self) -> Self:
@@ -78,7 +81,10 @@ class AgentDecisionDraft(StrictModel):
     @field_validator("company_fact_ids_to_use", "missing_information", mode="before")
     @classmethod
     def normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
+        res = _normalize_list(value)
+        if isinstance(res, list):
+            return res[:8]
+        return res
 
 
 class AgentDecision(StrictModel):
@@ -105,12 +111,35 @@ class AgentDecision(StrictModel):
         "candidate_concerns",
         "company_fact_ids_to_use",
         "missing_information",
+        mode="before",
+    )
+    @classmethod
+    def normalize_lists_8(cls, value: object) -> object:
+        res = _normalize_list(value)
+        if isinstance(res, list):
+            return res[:8]
+        return res
+
+    @field_validator(
         "policy_overrides",
         mode="before",
     )
     @classmethod
-    def normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
+    def normalize_policy_overrides(cls, value: object) -> object:
+        res = _normalize_list(value)
+        if isinstance(res, list):
+            return res[:12]
+        return res
+
+    @field_validator(
+        "retrieved_evidence",
+        mode="before",
+    )
+    @classmethod
+    def normalize_evidence(cls, value: object) -> object:
+        if isinstance(value, list):
+            return value[:12]
+        return value
 
 
 class DecisionTrace(StrictModel):

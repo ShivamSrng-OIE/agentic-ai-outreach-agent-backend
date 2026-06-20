@@ -23,7 +23,8 @@ class SupportedClaim(StrictModel):
     @classmethod
     def normalize_ids(cls, value: object) -> object:
         if isinstance(value, list):
-            return _sorted_unique_ids(remove_empty_strings([str(item) for item in value]))
+            res = _sorted_unique_ids(remove_empty_strings([str(item) for item in value]))
+            return res[:8]
         return value
 
 
@@ -32,11 +33,19 @@ class GeneratedResponseDraft(StrictModel):
     supported_claims: list[SupportedClaim] = Field(default_factory=list, max_length=8)
     company_fact_ids_used: list[str] = Field(default_factory=list, max_length=8)
 
+    @field_validator("supported_claims", mode="before")
+    @classmethod
+    def normalize_claims(cls, value: object) -> object:
+        if isinstance(value, list):
+            return value[:8]
+        return value
+
     @field_validator("company_fact_ids_used", mode="before")
     @classmethod
     def normalize_ids(cls, value: object) -> object:
         if isinstance(value, list):
-            return _sorted_unique_ids(remove_empty_strings([str(item) for item in value]))
+            res = _sorted_unique_ids(remove_empty_strings([str(item) for item in value]))
+            return res[:8]
         return value
 
     @model_validator(mode="after")
@@ -44,6 +53,8 @@ class GeneratedResponseDraft(StrictModel):
         derived_ids = _sorted_unique_ids(
             [fact_id for claim in self.supported_claims for fact_id in claim.evidence_fact_ids]
         )
+        if len(derived_ids) > 8:
+            derived_ids = derived_ids[:8]
         if derived_ids:
             object.__setattr__(self, "company_fact_ids_used", derived_ids)
         return self

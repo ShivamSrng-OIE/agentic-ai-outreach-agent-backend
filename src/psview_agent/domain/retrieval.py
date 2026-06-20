@@ -20,7 +20,8 @@ class RetrievalQuery(StrictModel):
     @classmethod
     def normalize_topics(cls, value: object) -> object:
         if isinstance(value, list):
-            return dedupe_casefold(remove_empty_strings([str(item) for item in value]))
+            normalized = dedupe_casefold(remove_empty_strings([str(item) for item in value]))
+            return normalized[:12]
         return value
 
 
