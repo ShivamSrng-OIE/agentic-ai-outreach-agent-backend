@@ -312,9 +312,7 @@ class AgentConfigurationService:
         draft: CompanyAgentConfigurationDraft,
         source_segments: Sequence[SourceSegment],
     ) -> CompanyAgentConfigurationDraft:
-        source_field_by_segment = {
-            segment.id: segment.source_field for segment in source_segments
-        }
+        source_field_by_segment = {segment.id: segment.source_field for segment in source_segments}
         normalized_facts = []
         for fact in draft.evidence_facts:
             source_fields = {
@@ -326,9 +324,7 @@ class AgentConfigurationService:
                 fact=fact,
                 source_fields=source_fields,
             )
-            normalized_facts.append(
-                fact.model_copy(update={"kind": inferred_kind})
-            )
+            normalized_facts.append(fact.model_copy(update={"kind": inferred_kind}))
         return draft.model_copy(update={"evidence_facts": normalized_facts})
 
     def _infer_evidence_kind(
@@ -453,9 +449,7 @@ class AgentConfigurationService:
                 fact=(
                     "Acme AI builds AI workflow software for teams that need reliable "
                     "automation and thoughtful product delivery."
-                ).replace(
-                    "Acme AI", context.company_name
-                ),
+                ).replace("Acme AI", context.company_name),
                 kind=EvidenceKind.PRODUCT,
                 source_segment_ids=[segment_by_field["company_description"].id],
                 retrieval_tags=["company", "product", "automation"],

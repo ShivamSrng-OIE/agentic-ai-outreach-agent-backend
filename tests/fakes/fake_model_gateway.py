@@ -205,7 +205,9 @@ class FakeModelGateway(ModelGateway):
                             claim="the company is hiring builders for targeted roles",
                             evidence_fact_ids=fact_ids[:1],
                         )
-                    ] if fact_ids else [],
+                    ]
+                    if fact_ids
+                    else [],
                 ),
                 OutreachMessageDraft(
                     stage=OutreachStage.FOLLOW_UP,
@@ -221,7 +223,9 @@ class FakeModelGateway(ModelGateway):
                             claim="the company is hiring builders for targeted roles",
                             evidence_fact_ids=fact_ids[:1],
                         )
-                    ] if fact_ids else [],
+                    ]
+                    if fact_ids
+                    else [],
                 ),
                 OutreachMessageDraft(
                     stage=OutreachStage.FINAL_CLOSEOUT,

@@ -312,9 +312,7 @@ class ConversationStartService:
                         "outreach claim cites evidence that is not appropriate for outreach"
                     )
             if any(phrase in message.message.casefold() for phrase in UNSUPPORTED_FIT_LANGUAGE):
-                raise InvalidCompanyEvidenceError(
-                    "outreach message uses unsupported fit language"
-                )
+                raise InvalidCompanyEvidenceError("outreach message uses unsupported fit language")
             if self._has_broken_candidate_phrasing(message.message):
                 raise InvalidCompanyEvidenceError(
                     "outreach message contains broken candidate phrasing"
@@ -328,14 +326,10 @@ class ConversationStartService:
                     "outreach message contains raw pasted candidate or role text"
                 )
             if self._question_count(message.message) > 1:
-                raise InvalidCompanyEvidenceError(
-                    "outreach message asks more than one question"
-                )
+                raise InvalidCompanyEvidenceError("outreach message asks more than one question")
             sentence_limit = 4 if message.stage is OutreachStage.INITIAL_OUTREACH else 3
             if self._sentence_count(message.message) > sentence_limit:
-                raise InvalidCompanyEvidenceError(
-                    "outreach message exceeds the sentence limit"
-                )
+                raise InvalidCompanyEvidenceError("outreach message exceeds the sentence limit")
             if len(message.message) > self._max_message_length(message.stage):
                 raise InvalidCompanyEvidenceError("outreach message is too long")
             polished_messages.append(message)
@@ -601,9 +595,7 @@ class ConversationStartService:
                 )
             )
         )
-        role_tokens = set(
-            tokenize_text(" ".join([target_role, target_role_description or ""]))
-        )
+        role_tokens = set(tokenize_text(" ".join([target_role, target_role_description or ""])))
         if not candidate_tokens or not role_tokens:
             return 0.0
         return len(candidate_tokens & role_tokens) / len(role_tokens)
@@ -649,9 +641,7 @@ class ConversationStartService:
         target_role_description: str | None,
         fact_id: str,
     ) -> bool:
-        fact_lookup = {
-            fact.id: fact for fact in configuration.evidence_corpus.evidence_facts
-        }
+        fact_lookup = {fact.id: fact for fact in configuration.evidence_corpus.evidence_facts}
         fact = fact_lookup.get(fact_id)
         if fact is None or fact.kind not in OUTREACH_ALLOWED_EVIDENCE_KINDS:
             return False
@@ -717,9 +707,7 @@ class ConversationStartService:
 
     def _sentence_count(self, message: str) -> int:
         sentences = [
-            sentence
-            for sentence in re.split(r"(?<=[.!?])\s+", message.strip())
-            if sentence.strip()
+            sentence for sentence in re.split(r"(?<=[.!?])\s+", message.strip()) if sentence.strip()
         ]
         return max(1, len(sentences))
 
@@ -740,10 +728,7 @@ class ConversationStartService:
         retrieved_evidence: Sequence[RetrievedEvidence],
         message: OutreachMessage,
     ) -> OutreachMessage:
-        available_facts = {
-            item.evidence.id: item.evidence
-            for item in retrieved_evidence
-        }
+        available_facts = {item.evidence.id: item.evidence for item in retrieved_evidence}
         repaired_claims: list[SupportedClaim] = []
         for claim in message.supported_claims:
             repaired_ids = self._repair_claim_evidence_ids(
@@ -754,9 +739,7 @@ class ConversationStartService:
             )
             if not repaired_ids:
                 continue
-            repaired_claims.append(
-                claim.model_copy(update={"evidence_fact_ids": repaired_ids})
-            )
+            repaired_claims.append(claim.model_copy(update={"evidence_fact_ids": repaired_ids}))
         return message.model_copy(update={"supported_claims": repaired_claims})
 
     def _repair_claim_evidence_ids(
@@ -804,9 +787,7 @@ class ConversationStartService:
                 fact=fact,
             )
             if score > best_score or (
-                score == best_score
-                and best_fact_id is not None
-                and fact_id < best_fact_id
+                score == best_score and best_fact_id is not None and fact_id < best_fact_id
             ):
                 best_fact_id = fact_id
                 best_score = score
@@ -819,9 +800,7 @@ class ConversationStartService:
         claim: str,
         fact_id: str,
     ) -> bool:
-        fact_lookup = {
-            fact.id: fact for fact in configuration.evidence_corpus.evidence_facts
-        }
+        fact_lookup = {fact.id: fact for fact in configuration.evidence_corpus.evidence_facts}
         fact = fact_lookup.get(fact_id)
         if fact is None:
             return False

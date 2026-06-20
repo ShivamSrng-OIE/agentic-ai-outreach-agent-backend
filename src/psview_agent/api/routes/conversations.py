@@ -35,8 +35,7 @@ START_CONVERSATION_EXAMPLES = {
                     "automation and thoughtful product delivery."
                 ),
                 "culture_and_values": (
-                    "The team values ownership, clarity, curiosity, and respectful "
-                    "collaboration."
+                    "The team values ownership, clarity, curiosity, and respectful collaboration."
                 ),
                 "hiring_profiles": (
                     "We hire builders who can ship product, communicate well, and work "
@@ -99,9 +98,7 @@ async def start_conversation(
     configuration = request.configuration
     if configuration is None:
         assert request.company_context is not None
-        configuration = await configuration_service.configure_agent(
-            context=request.company_context
-        )
+        configuration = await configuration_service.configure_agent(context=request.company_context)
     session, trace = await service.start_conversation(
         configuration=configuration,
         candidate=request.candidate,

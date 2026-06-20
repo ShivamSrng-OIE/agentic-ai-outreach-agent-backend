@@ -473,9 +473,7 @@ class OpenAICompatibleModelGateway(ModelGateway):
             defaults = stage_defaults[message.stage]
             objective = defaults["objective"]
             trigger = defaults["trigger"]
-            if (
-                objective != message.objective or trigger != message.trigger
-            ):
+            if objective != message.objective or trigger != message.trigger:
                 changed = True
             normalized_messages.append(
                 {

@@ -30,9 +30,7 @@ def _build_rationale_summary(
     missing_information: Sequence[str],
 ) -> str:
     topic = (
-        analysis.questions_or_topics[0]
-        if analysis.questions_or_topics
-        else "their latest reply"
+        analysis.questions_or_topics[0] if analysis.questions_or_topics else "their latest reply"
     )
     if missing_information:
         missing = ", ".join(missing_information[:2])

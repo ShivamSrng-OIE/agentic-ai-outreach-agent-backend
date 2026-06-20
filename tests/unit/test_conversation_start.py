@@ -48,9 +48,7 @@ async def test_conversation_start_returns_three_messages_and_initial_trace() -> 
 @pytest.mark.asyncio
 async def test_conversation_start_falls_back_when_outreach_plan_output_is_invalid() -> None:
     service = ConversationStartService(
-        gateway=FakeModelGateway(
-            scenarios={"generate_outreach_plan": ModelInvalidOutputError()}
-        ),
+        gateway=FakeModelGateway(scenarios={"generate_outreach_plan": ModelInvalidOutputError()}),
         retriever=LexicalEvidenceRetriever(
             RetrievalSettings(
                 enabled=True,
@@ -98,8 +96,7 @@ async def test_conversation_start_falls_back_when_unattributed_factual_outreach(
                             "objective": "follow up",
                             "trigger": "no response",
                             "message": (
-                                "Following up because the company is still hiring for "
-                                "this role."
+                                "Following up because the company is still hiring for this role."
                             ),
                             "company_fact_ids_used": ["fact_001"],
                         },
@@ -136,9 +133,7 @@ async def test_conversation_start_falls_back_when_unattributed_factual_outreach(
 @pytest.mark.asyncio
 async def test_conversation_start_repairs_semantically_wrong_claim_citations() -> None:
     configuration = await AgentConfigurationService(
-        gateway=FakeModelGateway(
-            scenarios={"configure_company_agent": ModelInvalidOutputError()}
-        )
+        gateway=FakeModelGateway(scenarios={"configure_company_agent": ModelInvalidOutputError()})
     ).configure_agent(context=sample_company_context())
     candidate = sample_candidate()
     service = ConversationStartService(
@@ -222,10 +217,7 @@ async def test_conversation_start_repairs_semantically_wrong_claim_citations() -
     )
 
     first_message = session.outreach_plan.messages[0]
-    claim_map = {
-        claim.claim: claim.evidence_fact_ids
-        for claim in first_message.supported_claims
-    }
+    claim_map = {claim.claim: claim.evidence_fact_ids for claim in first_message.supported_claims}
     assert claim_map[
         "Acme builds AI workflow software for teams that need reliable automation "
         "and thoughtful product delivery."
@@ -422,9 +414,7 @@ async def test_fallback_avoids_security_facts_when_role_is_not_security_related(
         }
     )
     service = ConversationStartService(
-        gateway=FakeModelGateway(
-            scenarios={"generate_outreach_plan": ModelInvalidOutputError()}
-        ),
+        gateway=FakeModelGateway(scenarios={"generate_outreach_plan": ModelInvalidOutputError()}),
         retriever=LexicalEvidenceRetriever(
             RetrievalSettings(
                 enabled=True,

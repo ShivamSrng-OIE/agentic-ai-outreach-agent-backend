@@ -40,9 +40,7 @@ def run_response_checks(
     character_count = len(message)
     retrieved_ids = {item.evidence.id for item in decision.retrieved_evidence}
     cited_ids = {
-        fact_id
-        for claim in response.supported_claims
-        for fact_id in claim.evidence_fact_ids
+        fact_id for claim in response.supported_claims for fact_id in claim.evidence_fact_ids
     }
     if not message:
         violations.append("empty_response")
@@ -60,9 +58,7 @@ def run_response_checks(
         and decision.selected_action.value in CLAIM_ATTRIBUTION_ACTIONS
     ):
         violations.append("missing_supported_claims")
-    if response.supported_claims and (
-        cited_ids != set(response.company_fact_ids_used)
-    ):
+    if response.supported_claims and (cited_ids != set(response.company_fact_ids_used)):
         violations.append("claim_id_mismatch")
     if any(phrase in message.casefold() for phrase in UNSUPPORTED_FIT_LANGUAGE):
         violations.append("unsupported_fit_language")

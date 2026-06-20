@@ -128,9 +128,7 @@ async def test_configuration_service_enriches_sparse_company_profile_fields() ->
 @pytest.mark.asyncio
 async def test_configuration_service_falls_back_when_model_output_is_invalid() -> None:
     service = AgentConfigurationService(
-        gateway=FakeModelGateway(
-            scenarios={"configure_company_agent": ModelInvalidOutputError()}
-        )
+        gateway=FakeModelGateway(scenarios={"configure_company_agent": ModelInvalidOutputError()})
     )
 
     configuration = await service.configure_agent(context=sample_company_context())
@@ -180,8 +178,7 @@ async def test_configuration_service_assigns_sensitive_and_working_style_kinds()
                         ),
                         EvidenceFactDraft(
                             fact=(
-                                "Visa sponsorship details are not included in the "
-                                "provided context."
+                                "Visa sponsorship details are not included in the provided context."
                             ),
                             source_segment_ids=[kwargs["source_segments"][6].id],
                             retrieval_tags=[],

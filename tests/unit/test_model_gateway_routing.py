@@ -102,12 +102,8 @@ def test_gateway_resolves_named_models_by_workload() -> None:
         settings=_settings(),
     )
 
-    assert gateway._resolve_model_name(ModelWorkload.GENERAL_CHAT) == (
-        "google/gemma-4-31b-it:free"
-    )
-    assert gateway._resolve_model_name(ModelWorkload.STRUCTURED_JSON) == (
-        "nex-agi/nex-n2-pro:free"
-    )
+    assert gateway._resolve_model_name(ModelWorkload.GENERAL_CHAT) == ("google/gemma-4-31b-it:free")
+    assert gateway._resolve_model_name(ModelWorkload.STRUCTURED_JSON) == ("nex-agi/nex-n2-pro:free")
     assert gateway._resolve_model_name(ModelWorkload.CODING_BACKEND) == (
         "cohere/north-mini-code:free"
     )
