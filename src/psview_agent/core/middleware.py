@@ -136,7 +136,9 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         if settings is None:
             return await call_next(request)
         origin = request.headers.get("origin")
-        if request.method == "OPTIONS" and origin and origin in settings.runtime.allowed_origins:
+        allowed = settings.runtime.allowed_origins
+        is_allowed = origin and (origin in allowed or "*" in allowed)
+        if request.method == "OPTIONS" and origin and is_allowed:
             incoming = request.headers.get(REQUEST_ID_HEADER, "")
             request_id = incoming if REQUEST_ID_PATTERN.fullmatch(incoming) else new_request_id()
             set_request_id(request_id)
@@ -150,7 +152,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             return response
 
         response = await call_next(request)
-        if origin and origin in settings.runtime.allowed_origins:
+        if origin and is_allowed:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
             response.headers["Vary"] = "Origin"
