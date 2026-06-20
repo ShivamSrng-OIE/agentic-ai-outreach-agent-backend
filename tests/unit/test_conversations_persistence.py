@@ -133,3 +133,43 @@ async def test_api_routes_persistence_logging(client: AsyncClient, app) -> None:
     assert call_args["user_id"] == "usr-test-123"
     assert call_args["action"] == "turn"
     assert call_args["candidate_reply"] == "I am interested in hearing more about the tech stack."
+
+
+@pytest.mark.anyio
+async def test_agent_configure_persistence_logging(client: AsyncClient, app) -> None:
+    # Mock MongoDB state in app
+    mock_db = MagicMock()
+    mock_db.interactions = MagicMock()
+    mock_db.interactions.insert_one = AsyncMock()
+    app.state.mongodb = mock_db
+
+    payload = {
+        "company_context": {
+            "company_name": "Test Acme Tech",
+            "company_description": "We build AI workflow software for teams that need reliable automation and thoughtful product delivery.",
+            "culture_and_values": "The team values ownership, clarity, curiosity, and respectful collaboration.",
+            "hiring_profiles": "We hire builders who can ship product, communicate well, and work across functions.",
+            "communication_tone": "Clear, warm, direct, and specific.",
+            "recruiting_intent": "We want to engage strong product-minded engineers who may be a fit for our growth plans.",
+            "additional_context": "The team is focused on real customer problems and thoughtful long-term execution."
+        }
+    }
+
+    headers = {
+        "X-User-ID": "usr-config-123",
+        "X-User-Location": json.dumps({
+            "ip": "8.8.8.8",
+            "city": "Mountain View",
+            "region": "California",
+            "country": "United States",
+        })
+    }
+
+    response = await client.post("/api/v1/agents/configure", json=payload, headers=headers)
+    assert response.status_code == 200
+    assert mock_db.interactions.insert_one.called
+
+    call_args = mock_db.interactions.insert_one.call_args[0][0]
+    assert call_args["user_id"] == "usr-config-123"
+    assert call_args["action"] == "configure"
+    assert call_args["company_context"]["company_name"] == "Test Acme Tech"
