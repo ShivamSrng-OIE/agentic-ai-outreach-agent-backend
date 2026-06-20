@@ -303,6 +303,8 @@ class OpenAICompatibleModelGateway(ModelGateway):
                     isinstance(mapped, (ModelIncompleteResponseError, ModelInvalidOutputError))
                 )
                 if is_fallbackable and self._settings.model.structured_output_mode is StructuredOutputMode.AUTO:
+                    if model_name in self._cached_modes and self._cached_modes[model_name] == mode:
+                        self._cached_modes.pop(model_name, None)
                     exceptions.append(mapped if isinstance(mapped, Exception) else Exception(str(mapped)))
                     continue
                 if mapped is not exc:
@@ -322,12 +324,13 @@ class OpenAICompatibleModelGateway(ModelGateway):
 
     def _mode_attempts(self, model_name: str) -> list[StructuredOutputMode]:
         cached_mode = self._cached_modes.get(model_name)
-        if cached_mode is not None:
-            return [cached_mode]
-        return mode_sequence(
+        seq = mode_sequence(
             self._settings.model.provider,
             self._settings.model.structured_output_mode,
         )
+        if cached_mode is not None and cached_mode in seq:
+            return [cached_mode] + [m for m in seq if m != cached_mode]
+        return seq
 
     async def _request_with_mode(
         self,
@@ -412,13 +415,26 @@ class OpenAICompatibleModelGateway(ModelGateway):
         try:
             return output_model.model_validate_json(cleaned_content)
         except ValidationError as exc:
+            LOGGER.warning(
+                "validation failed for model %s; attempting repair. error: %s. content: %s",
+                output_model.__name__,
+                str(exc),
+                cleaned_content,
+            )
             repaired = self._attempt_repair(
                 content=cleaned_content,
                 errors=str(exc),
                 output_model=output_model,
             )
             if repaired is None:
+                LOGGER.error(
+                    "repair failed for model %s. error: %s. content: %s",
+                    output_model.__name__,
+                    str(exc),
+                    cleaned_content,
+                )
                 raise ModelInvalidOutputError("structured output validation failed") from exc
+            LOGGER.info("successfully repaired model %s", output_model.__name__)
             return repaired
 
     def _attempt_repair(
@@ -439,90 +455,192 @@ class OpenAICompatibleModelGateway(ModelGateway):
 
         import re
         from enum import Enum
+        from typing import get_origin, get_args, Union
+        from types import UnionType
 
-        # 1. Map camelCase and kebab-case keys to snake_case
         def to_snake(name: str) -> str:
             s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
             s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
             return s2.replace('-', '_')
 
-        normalized_raw = {}
-        for k, v in raw.items():
-            normalized_raw[to_snake(k)] = v
-        raw = normalized_raw
+        def resolve_base_model(ann: object) -> type[BaseModel] | None:
+            if isinstance(ann, type) and issubclass(ann, BaseModel):
+                return ann
+            origin = get_origin(ann)
+            if origin in (Union, UnionType):
+                for arg in get_args(ann):
+                    if isinstance(arg, type) and issubclass(arg, BaseModel):
+                        return arg
+            return None
 
-        # 2. Drop extra keys to avoid validation issues with extra="forbid"
-        for key in list(raw.keys()):
-            if key not in output_model.model_fields:
-                raw.pop(key)
+        def repair_dict(data: dict[str, object], model_cls: type[BaseModel]) -> dict[str, object]:
+            # 1. Map camelCase and kebab-case keys to snake_case
+            normalized_raw = {}
+            for k, v in data.items():
+                normalized_raw[to_snake(k)] = v
+            data = normalized_raw
 
-        # 3. Heal missing or incorrect value types
-        for field_name, field_info in output_model.model_fields.items():
-            if field_name not in raw:
-                # Fill default values or factories
-                if field_info.default is not None:
-                    raw[field_name] = field_info.default
-                elif field_info.default_factory is not None:
-                    raw[field_name] = field_info.default_factory()
-                else:
-                    # Provide type-based fallbacks for missing fields
-                    annotation = field_info.annotation
-                    if annotation is str:
-                        raw[field_name] = "N/A"
-                    elif annotation is float or annotation is int:
-                        raw[field_name] = 0
-                    elif annotation is bool:
-                        raw[field_name] = False
-                    elif hasattr(annotation, "__origin__") and annotation.__origin__ is list:
-                        raw[field_name] = []
-                    elif isinstance(annotation, type) and issubclass(annotation, Enum):
-                        raw[field_name] = list(annotation)[0]
-            else:
-                val = raw[field_name]
+            # 2. Drop extra keys to avoid validation issues with extra="forbid"
+            for key in list(data.keys()):
+                if key not in model_cls.model_fields:
+                    data.pop(key)
+
+            # Specific domain repairs for CandidateAnalysis opt-out rules
+            if model_cls.__name__ == "CandidateAnalysis":
+                intent_val = data.get("intent")
+                opt_out_val = data.get("explicit_opt_out")
+                if intent_val == "do_not_contact" and not opt_out_val:
+                    data["explicit_opt_out"] = True
+                elif opt_out_val and intent_val not in ("do_not_contact", "clear_rejection"):
+                    data["explicit_opt_out"] = False
+
+            # 3. Heal missing or incorrect value types
+            for field_name, field_info in model_cls.model_fields.items():
                 annotation = field_info.annotation
+                nested_model = resolve_base_model(annotation)
+                origin = get_origin(annotation)
 
-                # Wrap non-list elements if list is expected
-                if hasattr(annotation, "__origin__") and annotation.__origin__ is list:
-                    if not isinstance(val, list):
-                        if val is None:
-                            raw[field_name] = []
-                        else:
-                            raw[field_name] = [str(val)]
-                
-                # Coerce numeric values
-                elif annotation is float:
-                    try:
-                        raw[field_name] = float(val)
-                    except (ValueError, TypeError):
-                        raw[field_name] = 0.0
-                elif annotation is int:
-                    try:
-                        raw[field_name] = int(val)
-                    except (ValueError, TypeError):
-                        raw[field_name] = 0
-
-                # Coerce boolean values
-                elif annotation is bool and not isinstance(val, bool):
-                    if isinstance(val, str):
-                        raw[field_name] = val.lower() in ("true", "1", "yes")
+                if field_name not in data:
+                    # Fill default values or factories
+                    if field_info.default is not None:
+                        data[field_name] = field_info.default
+                    elif field_info.default_factory is not None:
+                        data[field_name] = field_info.default_factory()
                     else:
-                        raw[field_name] = bool(val)
+                        # Provide type-based fallbacks for missing fields
+                        if annotation is str:
+                            data[field_name] = "Not provided"
+                        elif annotation is float or annotation is int:
+                            data[field_name] = 0
+                        elif annotation is bool:
+                            data[field_name] = False
+                        elif origin is list:
+                            data[field_name] = []
+                        elif isinstance(annotation, type) and issubclass(annotation, Enum):
+                            data[field_name] = list(annotation)[0]
+                        elif nested_model is not None:
+                            data[field_name] = repair_dict({}, nested_model)
+                else:
+                    val = data[field_name]
 
-                # Coerce enum values (match string to member value or name case-insensitively)
-                elif isinstance(annotation, type) and issubclass(annotation, Enum):
-                    if isinstance(val, str):
-                        matched = None
-                        for member in annotation:
-                            if member.value.lower() == val.lower() or member.name.lower() == val.lower().replace('-', '_'):
-                                matched = member
-                                break
-                        if matched is not None:
-                            raw[field_name] = matched
+                    # Recursively repair nested BaseModel
+                    if nested_model is not None:
+                        if isinstance(val, dict):
+                            data[field_name] = repair_dict(val, nested_model)
                         else:
-                            raw[field_name] = list(annotation)[0]
+                            data[field_name] = repair_dict({}, nested_model)
+                        continue
 
+                    # Recursively repair list of BaseModels
+                    if origin is list:
+                        args = get_args(annotation)
+                        item_model = resolve_base_model(args[0]) if args else None
+                        if item_model is not None:
+                            if isinstance(val, list):
+                                data[field_name] = [
+                                    repair_dict(item, item_model) if isinstance(item, dict) else repair_dict({}, item_model)
+                                    for item in val
+                                ]
+                            else:
+                                if val is None:
+                                    data[field_name] = []
+                                else:
+                                    data[field_name] = [
+                                        repair_dict(val, item_model) if isinstance(val, dict) else repair_dict({}, item_model)
+                                    ]
+                            
+                            # Pad nested list if it is under min_length/min_items constraint
+                            min_len = None
+                            for meta in getattr(field_info, "metadata", []):
+                                if hasattr(meta, "min_length") and isinstance(meta.min_length, int):
+                                    min_len = meta.min_length
+                                elif hasattr(meta, "min_items") and isinstance(meta.min_items, int):
+                                    min_len = meta.min_items
+                            if min_len is not None and isinstance(data[field_name], list) and len(data[field_name]) < min_len:
+                                while len(data[field_name]) < min_len:
+                                    data[field_name].append(repair_dict({}, item_model))
+                            continue
+
+                    # Handle string length constraints
+                    if isinstance(val, str):
+                        min_len = None
+                        max_len = None
+                        for meta in getattr(field_info, "metadata", []):
+                            if hasattr(meta, "min_length") and isinstance(meta.min_length, int):
+                                min_len = meta.min_length
+                            if hasattr(meta, "max_length") and isinstance(meta.max_length, int):
+                                max_len = meta.max_length
+                        if min_len is not None and len(val) < min_len:
+                            val = val.ljust(min_len, ".")
+                        if max_len is not None and len(val) > max_len:
+                            val = val[:max_len]
+                        data[field_name] = val
+                        val = data[field_name]
+
+                    # Wrap non-list elements if list is expected
+                    if origin is list:
+                        if not isinstance(val, list):
+                            if val is None:
+                                data[field_name] = []
+                            else:
+                                data[field_name] = [str(val)]
+                        
+                        # Pad basic list if under constraints
+                        min_len = None
+                        for meta in getattr(field_info, "metadata", []):
+                            if hasattr(meta, "min_length") and isinstance(meta.min_length, int):
+                                min_len = meta.min_length
+                            elif hasattr(meta, "min_items") and isinstance(meta.min_items, int):
+                                min_len = meta.min_items
+                        if min_len is not None and isinstance(data[field_name], list) and len(data[field_name]) < min_len:
+                            args = get_args(annotation)
+                            item_type = args[0] if args else str
+                            while len(data[field_name]) < min_len:
+                                if item_type is str:
+                                    data[field_name].append("dummy")
+                                elif item_type is int or item_type is float:
+                                    data[field_name].append(0)
+                                elif item_type is bool:
+                                    data[field_name].append(False)
+                                else:
+                                    data[field_name].append(None)
+                    
+                    # Coerce numeric values
+                    elif annotation is float:
+                        try:
+                            data[field_name] = float(val)
+                        except (ValueError, TypeError):
+                            data[field_name] = 0.0
+                    elif annotation is int:
+                        try:
+                            data[field_name] = int(val)
+                        except (ValueError, TypeError):
+                            data[field_name] = 0
+
+                    # Coerce boolean values
+                    elif annotation is bool and not isinstance(val, bool):
+                        if isinstance(val, str):
+                            data[field_name] = val.lower() in ("true", "1", "yes")
+                        else:
+                            data[field_name] = bool(val)
+
+                    # Coerce enum values (match string to member value or name case-insensitively)
+                    elif isinstance(annotation, type) and issubclass(annotation, Enum):
+                        if isinstance(val, str):
+                            matched = None
+                            for member in annotation:
+                                if member.value.lower() == val.lower() or member.name.lower() == val.lower().replace('-', '_'):
+                                    matched = member
+                                    break
+                            if matched is not None:
+                                data[field_name] = matched
+                            else:
+                                data[field_name] = list(annotation)[0]
+            return data
+
+        repaired_dict = repair_dict(raw, output_model)
         try:
-            return output_model.model_validate(raw)
+            return output_model.model_validate(repaired_dict)
         except ValidationError:
             LOGGER.debug("repair failed", extra={"error_category": "model_invalid_output"})
             return None

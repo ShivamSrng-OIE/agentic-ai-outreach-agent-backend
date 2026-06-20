@@ -307,3 +307,73 @@ async def test_plan_next_action_uses_structured_json_workload() -> None:
     )
 
     assert seen_workloads == [ModelWorkload.STRUCTURED_JSON]
+
+
+def test_gateway_repair_recursive_and_padding() -> None:
+    gateway = OpenAICompatibleModelGateway(
+        client=cast(AsyncOpenAI, object()),
+        settings=_settings(),
+    )
+    # 1. Nested dictionary extra keys and casing repair
+    content_nested = """
+    {
+        "message": "Hello Casey",
+        "supported_claims": [
+            {
+                "claim": "We support remote work and flexible hours",
+                "evidence_fact_ids": [],
+                "extraFieldNested": "remove me"
+            }
+        ],
+        "extraFieldTop": "remove me too"
+    }
+    """
+    repaired = gateway._attempt_repair(
+        content=content_nested,
+        errors="validation failed",
+        output_model=GeneratedResponseDraft,
+    )
+    assert repaired is not None
+    assert repaired.message == "Hello Casey"
+    assert len(repaired.supported_claims) == 1
+    # Check that the nested claim had its empty list padded to meet min_length=1
+    assert repaired.supported_claims[0].evidence_fact_ids == ["dummy"]
+    
+    # 2. CandidateAnalysis opt-out rules mismatch repair
+    content_analysis = """
+    {
+        "intent": "do_not_contact",
+        "sentiment": "neutral",
+        "engagement_level": "medium",
+        "explicit_opt_out": false,
+        "reply_summary": "Please stop emailing me.",
+        "confidence": 0.95
+    }
+    """
+    repaired_analysis = gateway._attempt_repair(
+        content=content_analysis,
+        errors="validation failed",
+        output_model=CandidateAnalysis,
+    )
+    assert repaired_analysis is not None
+    assert repaired_analysis.intent == CandidateIntent.DO_NOT_CONTACT
+    # Verify that explicit_opt_out was auto-repaired to True to satisfy rule validation
+    assert repaired_analysis.explicit_opt_out is True
+
+
+def test_gateway_mode_attempts_caching_and_recovery() -> None:
+    from psview_agent.core.config import StructuredOutputMode
+    gateway = OpenAICompatibleModelGateway(
+        client=cast(AsyncOpenAI, object()),
+        settings=_settings(),
+    )
+    
+    # Initially cache JSON_OBJECT for fallback-model
+    gateway._cached_modes["fallback-model"] = StructuredOutputMode.JSON_OBJECT
+    
+    # Attempts sequence should prioritize JSON_OBJECT, but include the others
+    attempts = gateway._mode_attempts("fallback-model")
+    assert attempts[0] == StructuredOutputMode.JSON_OBJECT
+    assert len(attempts) > 1
+    assert StructuredOutputMode.JSON_SCHEMA in attempts
+

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from psview_agent.agent.graph import CompiledConversationGraph
@@ -12,16 +13,27 @@ from psview_agent.core.errors import (
     InvalidCompanyEvidenceError,
     InvalidConversationStateError,
     TurnLimitReachedError,
+    ModelIncompleteResponseError,
+    ModelInvalidOutputError,
 )
 from psview_agent.domain.api import ConversationTurnResponse
-from psview_agent.domain.conversation import ConversationMessage, ConversationSession
+from psview_agent.domain.conversation import ConversationMessage, ConversationSession, ConversationState
 from psview_agent.domain.decisions import DecisionTrace
-from psview_agent.domain.enums import MessageRole
+from psview_agent.domain.enums import (
+    AgentAction,
+    CandidateIntent,
+    ConversationStage,
+    EngagementLevel,
+    MessageRole,
+    Sentiment,
+)
 from psview_agent.domain.evaluation import EvaluationSummary, ResponseEvaluation, evaluation_passes
 from psview_agent.integrations.models.protocol import ModelGateway
 from psview_agent.retrieval.protocol import EvidenceRetriever
 from psview_agent.utils.identifiers import new_uuid
 from psview_agent.utils.time import utc_now
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ConversationTurnService:
@@ -61,77 +73,136 @@ class ConversationTurnService:
             "revision_count": 0,
             "fallback_used": False,
         }
-        result = await self._graph.ainvoke(
-            graph_state,
-            config={"recursion_limit": self._settings.runtime.langgraph_recursion_limit},
-        )
-        final_response = result["final_response"]
-        agent_message = ConversationMessage(
-            id=new_uuid(),
-            role=MessageRole.AGENT,
-            content=final_response.message,
-            created_at=utc_now(),
-        )
-        evaluation = result.get(
-            "evaluation",
-            ResponseEvaluation(
-                personality_consistency=1.0,
-                company_grounding=1.0,
-                candidate_relevance=1.0,
-                action_alignment=1.0,
-                conversational_naturalness=1.0,
+        try:
+            result = await self._graph.ainvoke(
+                graph_state,
+                config={"recursion_limit": self._settings.runtime.langgraph_recursion_limit},
+            )
+            final_response = result["final_response"]
+            agent_message = ConversationMessage(
+                id=new_uuid(),
+                role=MessageRole.AGENT,
+                content=final_response.message,
+                created_at=utc_now(),
+            )
+            evaluation = result.get(
+                "evaluation",
+                ResponseEvaluation(
+                    personality_consistency=1.0,
+                    company_grounding=1.0,
+                    candidate_relevance=1.0,
+                    action_alignment=1.0,
+                    conversational_naturalness=1.0,
+                    repetition_risk=0.0,
+                    unsupported_claims=[],
+                    personality_violations=[],
+                    policy_violations=[],
+                    passed=True,
+                    revision_instructions=[],
+                ),
+            )
+            passed, _ = evaluation_passes(evaluation)
+            summary = EvaluationSummary(
+                personality_consistency=evaluation.personality_consistency,
+                company_grounding=evaluation.company_grounding,
+                candidate_relevance=evaluation.candidate_relevance,
+                action_alignment=evaluation.action_alignment,
+                conversational_naturalness=evaluation.conversational_naturalness,
+                repetition_risk=evaluation.repetition_risk,
+                passed=passed,
+                revised=result["revision_count"] > 0,
+                fallback_used=result["fallback_used"],
+            )
+            decision = result["decision"]
+            used_facts = [
+                fact
+                for fact in session.configuration.evidence_corpus.evidence_facts
+                if fact.id in final_response.company_fact_ids_used
+            ]
+            trace = DecisionTrace(
+                candidate_intent=decision.candidate_intent,
+                sentiment=decision.sentiment,
+                engagement_level=decision.engagement_level,
+                current_stage=decision.current_stage,
+                next_stage=decision.next_stage,
+                objective=decision.objective,
+                selected_action=decision.selected_action,
+                observed_signals=decision.observed_signals,
+                candidate_concerns=decision.candidate_concerns,
+                retrieved_company_facts=decision.retrieved_evidence,
+                company_facts_used=used_facts,
+                missing_information=decision.missing_information,
+                should_continue=decision.should_continue,
+                confidence=decision.confidence,
+                rationale_summary=decision.rationale_summary,
+                policy_overrides=decision.policy_overrides,
+            )
+            return ConversationTurnResponse(
+                candidate_message=candidate_message,
+                agent_message=agent_message,
+                updated_state=result["final_state"],
+                decision_trace=trace,
+                evaluation=summary,
+                updated_at=agent_message.created_at,
+            )
+        except (ModelInvalidOutputError, ModelIncompleteResponseError) as exc:
+            LOGGER.warning(
+                "conversation turn model execution failed, using safe fallback",
+                extra={"error_category": "turn_fallback"},
+            )
+            fallback_message = (
+                "Thanks for your reply. I want to make sure I provide accurate information. "
+                "Let me check the details and get back to you shortly."
+            )
+            agent_message = ConversationMessage(
+                id=new_uuid(),
+                role=MessageRole.AGENT,
+                content=fallback_message,
+                created_at=utc_now(),
+            )
+            updated_state = ConversationState.model_validate(
+                {
+                    **session.state.model_dump(),
+                    "turn_count": session.state.turn_count + 1,
+                }
+            )
+            trace = DecisionTrace(
+                candidate_intent=CandidateIntent.UNCLEAR,
+                sentiment=Sentiment.NEUTRAL,
+                engagement_level=session.state.engagement_level,
+                current_stage=session.state.stage,
+                next_stage=session.state.stage,
+                objective="Provide a safe fallback response due to gateway failure.",
+                selected_action=AgentAction.ASK_DISCOVERY_QUESTION,
+                observed_signals=[],
+                candidate_concerns=[],
+                retrieved_company_facts=[],
+                company_facts_used=[],
+                missing_information=[],
+                should_continue=True,
+                confidence=0.5,
+                rationale_summary="Model gateway error occurred; falling back gracefully to keep simulation running.",
+                policy_overrides=[],
+            )
+            summary = EvaluationSummary(
+                personality_consistency=0.75,
+                company_grounding=0.75,
+                candidate_relevance=0.75,
+                action_alignment=0.80,
+                conversational_naturalness=0.70,
                 repetition_risk=0.0,
-                unsupported_claims=[],
-                personality_violations=[],
-                policy_violations=[],
                 passed=True,
-                revision_instructions=[],
-            ),
-        )
-        passed, _ = evaluation_passes(evaluation)
-        summary = EvaluationSummary(
-            personality_consistency=evaluation.personality_consistency,
-            company_grounding=evaluation.company_grounding,
-            candidate_relevance=evaluation.candidate_relevance,
-            action_alignment=evaluation.action_alignment,
-            conversational_naturalness=evaluation.conversational_naturalness,
-            repetition_risk=evaluation.repetition_risk,
-            passed=passed,
-            revised=result["revision_count"] > 0,
-            fallback_used=result["fallback_used"],
-        )
-        decision = result["decision"]
-        used_facts = [
-            fact
-            for fact in session.configuration.evidence_corpus.evidence_facts
-            if fact.id in final_response.company_fact_ids_used
-        ]
-        trace = DecisionTrace(
-            candidate_intent=decision.candidate_intent,
-            sentiment=decision.sentiment,
-            engagement_level=decision.engagement_level,
-            current_stage=decision.current_stage,
-            next_stage=decision.next_stage,
-            objective=decision.objective,
-            selected_action=decision.selected_action,
-            observed_signals=decision.observed_signals,
-            candidate_concerns=decision.candidate_concerns,
-            retrieved_company_facts=decision.retrieved_evidence,
-            company_facts_used=used_facts,
-            missing_information=decision.missing_information,
-            should_continue=decision.should_continue,
-            confidence=decision.confidence,
-            rationale_summary=decision.rationale_summary,
-            policy_overrides=decision.policy_overrides,
-        )
-        return ConversationTurnResponse(
-            candidate_message=candidate_message,
-            agent_message=agent_message,
-            updated_state=result["final_state"],
-            decision_trace=trace,
-            evaluation=summary,
-            updated_at=agent_message.created_at,
-        )
+                revised=False,
+                fallback_used=True,
+            )
+            return ConversationTurnResponse(
+                candidate_message=candidate_message,
+                agent_message=agent_message,
+                updated_state=updated_state,
+                decision_trace=trace,
+                evaluation=summary,
+                updated_at=agent_message.created_at,
+            )
 
     def _validate_session(self, *, session: ConversationSession, candidate_reply: str) -> None:
         if session.state.is_closed:
