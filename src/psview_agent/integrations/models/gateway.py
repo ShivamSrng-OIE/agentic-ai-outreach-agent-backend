@@ -297,7 +297,12 @@ class OpenAICompatibleModelGateway(ModelGateway):
                     model_name=model_name,
                 )
             except Exception as exc:
-                mapped = map_openai_error(exc)
+                import instructor
+                from pydantic import ValidationError as PydanticValidationError
+                if isinstance(exc, (instructor.exceptions.InstructorRetryException, PydanticValidationError)):
+                    mapped = ModelInvalidOutputError(f"instructor structured output validation failed: {exc}")
+                else:
+                    mapped = map_openai_error(exc)
                 is_fallbackable = (
                     is_unsupported_format_error(str(exc), mode=mode) or
                     isinstance(mapped, (ModelIncompleteResponseError, ModelInvalidOutputError))
@@ -342,65 +347,74 @@ class OpenAICompatibleModelGateway(ModelGateway):
         mode: StructuredOutputMode,
         model_name: str,
     ) -> TModel:
+        import instructor
+        
+        mode_map = {
+            StructuredOutputMode.JSON_SCHEMA: instructor.Mode.JSON_SCHEMA,
+            StructuredOutputMode.JSON_OBJECT: instructor.Mode.JSON,
+            StructuredOutputMode.PROMPT_JSON: instructor.Mode.MD_JSON,
+        }
+        
         prompt_suffix = ""
-        response_format = build_response_format(mode, schema_name, output_model)
         if mode in {StructuredOutputMode.JSON_OBJECT, StructuredOutputMode.PROMPT_JSON}:
             prompt_suffix = "\n" + prompt_json_instructions(output_model)
-        content = await self._call_chat_completion(
-            model_name=model_name,
-            system_prompt=system_prompt + prompt_suffix,
-            user_prompt=user_prompt,
-            response_format=response_format,
-        )
-        parsed = self._parse_content_as_model(content=content, output_model=output_model)
-        self._cached_modes[model_name] = mode
-        return sanitize_model_strings(parsed)
-
-    async def _call_chat_completion(
-        self,
-        *,
-        model_name: str,
-        system_prompt: str,
-        user_prompt: str,
-        response_format: dict[str, object] | None,
-    ) -> str:
-        async with self._semaphore:
-            create = cast(_ChatCreateCallable, self._client.chat.completions.create)
-            payload: dict[str, object] = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": self._settings.model.temperature,
-                "max_tokens": self._settings.model.max_output_tokens,
-                "extra_body": self._settings.model.extra_body,
-            }
-            if response_format is not None:
-                payload["response_format"] = response_format
-            response_object = await create(**payload)
-        response = cast(ChatCompletion, response_object)
-        request_id_obj = getattr(response, "_request_id", None)
-        request_id = request_id_obj if isinstance(request_id_obj, str) else None
-        LOGGER.info(
-            "model completion succeeded",
-            extra={
-                "provider": self._settings.model.provider.value,
-                "model_name": model_name,
-                "structured_output_mode": (
-                    self._cached_modes[model_name].value
-                    if model_name in self._cached_modes
-                    else self._settings.model.structured_output_mode.value
-                ),
-                "provider_request_id": request_id,
-            },
-        )
-        if not response.choices:
-            raise ModelIncompleteResponseError("provider returned no choices")
-        content = response.choices[0].message.content
-        if content is None or not content.strip():
-            raise ModelIncompleteResponseError("provider returned empty content")
-        return content
+            
+        instructor_client = instructor.from_openai(self._client, mode=mode_map[mode])
+        
+        try:
+            async with self._semaphore:
+                parsed = await instructor_client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt + prompt_suffix},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    response_model=output_model,
+                    temperature=self._settings.model.temperature,
+                    max_tokens=self._settings.model.max_output_tokens,
+                    max_retries=self._settings.model.repair_attempts,
+                    extra_body=self._settings.model.extra_body,
+                )
+            
+            LOGGER.info(
+                "Instructor model completion succeeded",
+                extra={
+                    "provider": self._settings.model.provider.value,
+                    "model_name": model_name,
+                    "structured_output_mode": mode.value,
+                },
+            )
+            self._cached_modes[model_name] = mode
+            return sanitize_model_strings(parsed)
+        except Exception as exc:
+            # Extract raw response text if validation failed under Instructor
+            raw_content = None
+            if hasattr(exc, "last_completion") and exc.last_completion:
+                raw_content = getattr(exc.last_completion.choices[0].message, "content", None)
+            
+            if raw_content:
+                LOGGER.warning(
+                    "Instructor validation failed for model %s; attempting custom recursive repair. error: %s. content: %s",
+                    output_model.__name__,
+                    str(exc),
+                    raw_content,
+                )
+                repaired = self._attempt_repair(
+                    content=raw_content,
+                    errors=str(exc),
+                    output_model=output_model,
+                )
+                if repaired is not None:
+                    LOGGER.info("successfully repaired model %s via fallback repair", output_model.__name__)
+                    self._cached_modes[model_name] = mode
+                    return repaired
+            
+            LOGGER.error(
+                "Instructor execution failed for model %s. error: %s",
+                output_model.__name__,
+                str(exc),
+            )
+            raise
 
     def _clean_json_text(self, content: str) -> str:
         content = content.strip()
@@ -409,33 +423,6 @@ class OpenAICompatibleModelGateway(ModelGateway):
         if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
             return content[first_brace:last_brace + 1].strip()
         return content
-
-    def _parse_content_as_model(self, *, content: str, output_model: type[TModel]) -> TModel:
-        cleaned_content = self._clean_json_text(content)
-        try:
-            return output_model.model_validate_json(cleaned_content)
-        except ValidationError as exc:
-            LOGGER.warning(
-                "validation failed for model %s; attempting repair. error: %s. content: %s",
-                output_model.__name__,
-                str(exc),
-                cleaned_content,
-            )
-            repaired = self._attempt_repair(
-                content=cleaned_content,
-                errors=str(exc),
-                output_model=output_model,
-            )
-            if repaired is None:
-                LOGGER.error(
-                    "repair failed for model %s. error: %s. content: %s",
-                    output_model.__name__,
-                    str(exc),
-                    cleaned_content,
-                )
-                raise ModelInvalidOutputError("structured output validation failed") from exc
-            LOGGER.info("successfully repaired model %s", output_model.__name__)
-            return repaired
 
     def _attempt_repair(
         self,
@@ -447,7 +434,8 @@ class OpenAICompatibleModelGateway(ModelGateway):
         if self._settings.model.repair_attempts <= 0:
             return None
         try:
-            raw = json.loads(content)
+            cleaned = self._clean_json_text(content)
+            raw = json.loads(cleaned)
         except json.JSONDecodeError:
             return None
         if not isinstance(raw, dict):
