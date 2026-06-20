@@ -297,9 +297,9 @@ class OpenAICompatibleModelGateway(ModelGateway):
                     model_name=model_name,
                 )
             except Exception as exc:
-                import instructor
+                from instructor.core import InstructorRetryException
                 from pydantic import ValidationError as PydanticValidationError
-                if isinstance(exc, (instructor.exceptions.InstructorRetryException, PydanticValidationError)):
+                if isinstance(exc, (InstructorRetryException, PydanticValidationError)):
                     mapped = ModelInvalidOutputError(f"instructor structured output validation failed: {exc}")
                 else:
                     mapped = map_openai_error(exc)
