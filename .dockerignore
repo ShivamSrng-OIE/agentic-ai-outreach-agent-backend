@@ -11,4 +11,3 @@ __pycache__
 tests
 docs
 .env
-config.yaml
