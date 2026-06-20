@@ -175,3 +175,67 @@ async def test_agent_configure_persistence_logging(client: AsyncClient, app) -> 
     assert call_args["user_id"] == "usr-config-123"
     assert call_args["action"] == "configure"
     assert call_args["company_context"]["company_name"] == "Test Acme Tech"
+
+
+@pytest.mark.anyio
+async def test_api_routes_error_persistence_logging(client: AsyncClient, app, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.fixtures.domain import sample_configuration
+    # Mock MongoDB state in app
+    mock_db = MagicMock()
+    mock_db.interactions = MagicMock()
+    mock_db.interactions.insert_one = AsyncMock()
+    app.state.mongodb = mock_db
+
+    # First, get a valid session by starting a conversation
+    config_obj = sample_configuration()
+    start_payload = {
+        "configuration": config_obj.model_dump(mode="json"),
+        "candidate": {
+            "name": "Alex",
+            "current_role": "Developer",
+            "background_summary": "Alex has built APIs and python services.",
+        },
+        "target_role": "Backend Engineer",
+    }
+    
+    headers = {
+        "X-User-ID": "usr-error-123",
+        "X-User-Location": json.dumps({
+            "ip": "8.8.8.8",
+            "city": "Mountain View",
+            "region": "California",
+            "country": "United States",
+        })
+    }
+
+    response = await client.post("/api/v1/conversations/start", json=start_payload, headers=headers)
+    assert response.status_code == 200
+    session_data = response.json()["session"]
+
+    # Force ConversationTurnService to raise TurnLimitReachedError
+    from psview_agent.core.errors import TurnLimitReachedError
+    from psview_agent.services.conversation_turn import ConversationTurnService
+    
+    async def mock_process_turn(*args, **kwargs):
+        raise TurnLimitReachedError("conversation turn limit reached")
+
+    monkeypatch.setattr(ConversationTurnService, "process_turn", mock_process_turn)
+
+    # Now make the turn call with the valid session which will trigger the error
+    turn_payload = {
+        "session": session_data,
+        "candidate_reply": "Yes, I am interested.",
+    }
+
+    mock_db.interactions.insert_one.reset_mock()
+    response = await client.post("/api/v1/conversations/turn", json=turn_payload, headers=headers)
+    assert response.status_code == 409  # TurnLimitReachedError maps to 409 Conflict
+    assert mock_db.interactions.insert_one.called
+
+    call_args = mock_db.interactions.insert_one.call_args[0][0]
+    assert call_args["user_id"] == "usr-error-123"
+    assert call_args["action"] == "error"
+    assert call_args["error_action"] == "turn"
+    assert call_args["error_code"] == "turn_limit_reached"
+    assert "limit" in call_args["message"].lower()
+

@@ -78,6 +78,95 @@ async def get_ip_location(ip: str, api_key: str | None) -> dict[str, object] | N
     return None
 
 
+ERROR_FRIENDLY_MESSAGES = {
+    "config_file_not_found": "Configuration file not found. Please contact support.",
+    "config_yaml_parse_error": "Failed to parse configuration settings. Please contact support.",
+    "unresolved_environment_placeholder": "Configuration environment placeholder unresolved. Please check backend environment variables.",
+    "invalid_configuration": "Agent configuration is invalid. Please verify company context and guidelines.",
+    "request_too_large": "The request is too large. Please limit the size of your input.",
+    "conversation_closed": "This conversation has already been closed. No further messages can be processed.",
+    "turn_limit_reached": "The maximum turn limit has been reached for this conversation.",
+    "invalid_conversation_state": "The conversation has an invalid state. Please refresh the page and try again.",
+    "invalid_company_evidence": "Validation failed for company evidence references. Please try again.",
+    "retrieval_error": "Failed to retrieve relevant company evidence. Please check the search index.",
+    "model_authentication_failed": "Authentication with the AI model provider failed. Please check backend API keys.",
+    "model_rate_limited": "The AI model rate limit has been exceeded. Please wait a moment and try again.",
+    "model_timeout": "The request to the AI model timed out. Please try again.",
+    "model_connection_failed": "Could not connect to the AI model provider. Please check backend network settings.",
+    "model_unavailable": "The AI model provider is currently unavailable. Please try again later.",
+    "model_refusal": "The AI model refused to process the request due to content policy.",
+    "model_incomplete_response": "The AI model returned an incomplete response. Please try again.",
+    "model_invalid_output": "The AI model output could not be validated. Please try again.",
+    "model_unsupported_feature": "Requested feature is not supported by the AI model.",
+    "validation_error": "Request validation failed. Please check the input fields.",
+    "internal_error": "An unexpected internal server error occurred. Please try again."
+}
+
+
+async def log_error_interaction(
+    *,
+    fastapi_request: Request,
+    x_user_id: str | None,
+    x_user_location: str | None,
+    action: str,
+    session_id: str | None,
+    candidate: dict[str, object] | None,
+    target_role: str | None,
+    exc: Exception,
+) -> None:
+    db = fastapi_request.app.state.mongodb
+    if db is None:
+        return
+
+    from psview_agent.core.errors import AppError
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
+
+    if isinstance(exc, AppError):
+        error_code = exc.code
+        raw_message = exc.message
+    elif isinstance(exc, (RequestValidationError, ValidationError)):
+        error_code = "validation_error"
+        raw_message = "request validation failed"
+    else:
+        error_code = "internal_error"
+        raw_message = "internal server error"
+
+    friendly_msg = ERROR_FRIENDLY_MESSAGES.get(error_code, raw_message)
+
+    try:
+        location = None
+        if x_user_location:
+            try:
+                location = json.loads(x_user_location)
+            except Exception:
+                location = {"raw": x_user_location}
+
+        if not location or not location.get("city"):
+            ip = get_client_ip(fastapi_request)
+            api_key = os.getenv("IPAPI_KEY")
+            resolved_location = await get_ip_location(ip, api_key)
+            if resolved_location:
+                location = resolved_location
+
+        await db.interactions.insert_one({
+            "user_id": x_user_id,
+            "location": location,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc),
+            "action": "error",
+            "session_id": session_id,
+            "candidate": candidate,
+            "target_role": target_role,
+            "error_action": action,
+            "error_code": error_code,
+            "message": friendly_msg,
+            "error_type": exc.__class__.__name__,
+            "details": [str(d) for d in getattr(exc, "details", [])]
+        })
+    except Exception as err:
+        LOGGER.warning(f"Failed to log error interaction: {err}")
+
+
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 
 START_CONVERSATION_EXAMPLES = {
@@ -157,16 +246,29 @@ async def start_conversation(
     x_user_id: Annotated[str | None, Header(alias="X-User-ID")] = None,
     x_user_location: Annotated[str | None, Header(alias="X-User-Location")] = None,
 ) -> StartConversationResponse:
-    configuration = request.configuration
-    if configuration is None:
-        assert request.company_context is not None
-        configuration = await configuration_service.configure_agent(context=request.company_context)
-    session, trace = await service.start_conversation(
-        configuration=configuration,
-        candidate=request.candidate,
-        target_role=request.target_role,
-        target_role_description=request.target_role_description,
-    )
+    try:
+        configuration = request.configuration
+        if configuration is None:
+            assert request.company_context is not None
+            configuration = await configuration_service.configure_agent(context=request.company_context)
+        session, trace = await service.start_conversation(
+            configuration=configuration,
+            candidate=request.candidate,
+            target_role=request.target_role,
+            target_role_description=request.target_role_description,
+        )
+    except Exception as exc:
+        await log_error_interaction(
+            fastapi_request=fastapi_request,
+            x_user_id=x_user_id,
+            x_user_location=x_user_location,
+            action="start",
+            session_id=None,
+            candidate=request.candidate.model_dump(mode="json") if request.candidate else None,
+            target_role=request.target_role,
+            exc=exc,
+        )
+        raise exc
 
     db = fastapi_request.app.state.mongodb
     if db is not None:
@@ -214,10 +316,23 @@ async def conversation_turn(
     x_user_id: Annotated[str | None, Header(alias="X-User-ID")] = None,
     x_user_location: Annotated[str | None, Header(alias="X-User-Location")] = None,
 ) -> ConversationTurnResponse:
-    response = await service.process_turn(
-        session=request.session,
-        candidate_reply=request.candidate_reply,
-    )
+    try:
+        response = await service.process_turn(
+            session=request.session,
+            candidate_reply=request.candidate_reply,
+        )
+    except Exception as exc:
+        await log_error_interaction(
+            fastapi_request=fastapi_request,
+            x_user_id=x_user_id,
+            x_user_location=x_user_location,
+            action="turn",
+            session_id=str(request.session.conversation_id) if request.session else None,
+            candidate=request.session.candidate.model_dump(mode="json") if request.session and request.session.candidate else None,
+            target_role=request.session.target_role if request.session else None,
+            exc=exc,
+        )
+        raise exc
 
     db = fastapi_request.app.state.mongodb
     if db is not None:
