@@ -242,6 +242,8 @@ async def conversation_turn(
                 "timestamp": datetime.datetime.now(datetime.timezone.utc),
                 "action": "turn",
                 "session_id": str(request.session.conversation_id),
+                "candidate": request.session.candidate.model_dump(mode="json"),
+                "target_role": request.session.target_role,
                 "candidate_reply": request.candidate_reply,
                 "agent_response": response.agent_message.content if response.agent_message else None,
                 "decision_trace": response.decision_trace.model_dump(mode="json") if response.decision_trace else None

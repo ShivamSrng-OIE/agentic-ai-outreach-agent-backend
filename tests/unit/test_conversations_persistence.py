@@ -133,6 +133,8 @@ async def test_api_routes_persistence_logging(client: AsyncClient, app) -> None:
     assert call_args["user_id"] == "usr-test-123"
     assert call_args["action"] == "turn"
     assert call_args["candidate_reply"] == "I am interested in hearing more about the tech stack."
+    assert call_args["candidate"]["name"] == "Alex"
+    assert call_args["target_role"] == "Backend Engineer"
 
 
 @pytest.mark.anyio
