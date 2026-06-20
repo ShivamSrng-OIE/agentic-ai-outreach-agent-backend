@@ -298,20 +298,15 @@ class OpenAICompatibleModelGateway(ModelGateway):
                 )
             except Exception as exc:
                 mapped = map_openai_error(exc)
-                if mapped is not exc:
-                    if isinstance(mapped, Exception) and is_unsupported_format_error(
-                        str(exc),
-                        mode=mode,
-                    ):
-                        exceptions.append(mapped)
-                        continue
-                    raise mapped from exc
-                if (
-                    is_unsupported_format_error(str(exc), mode=mode)
-                    and self._settings.model.structured_output_mode is StructuredOutputMode.AUTO
-                ):
-                    exceptions.append(exc if isinstance(exc, Exception) else Exception(str(exc)))
+                is_fallbackable = (
+                    is_unsupported_format_error(str(exc), mode=mode) or
+                    isinstance(mapped, (ModelIncompleteResponseError, ModelInvalidOutputError))
+                )
+                if is_fallbackable and self._settings.model.structured_output_mode is StructuredOutputMode.AUTO:
+                    exceptions.append(mapped if isinstance(mapped, Exception) else Exception(str(mapped)))
                     continue
+                if mapped is not exc:
+                    raise mapped from exc
                 raise
         raise ModelInvalidOutputError(
             f"no structured output mode succeeded for {schema_name}: "
