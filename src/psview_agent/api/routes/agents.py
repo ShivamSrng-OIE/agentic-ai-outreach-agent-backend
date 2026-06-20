@@ -53,8 +53,8 @@ async def configure_agent(
                 "location": location,
                 "timestamp": datetime.datetime.now(datetime.timezone.utc),
                 "action": "configure",
-                "company_context": request.company_context.model_dump(),
-                "configuration": configuration.model_dump()
+                "company_context": request.company_context.model_dump(mode="json"),
+                "configuration": configuration.model_dump(mode="json")
             })
         except Exception as err:
             LOGGER.warning(f"Failed to log configure interaction: {err}")

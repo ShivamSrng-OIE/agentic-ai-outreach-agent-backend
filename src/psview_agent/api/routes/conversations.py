@@ -193,9 +193,9 @@ async def start_conversation(
                 "session_id": str(session.conversation_id),
                 "target_role": request.target_role,
                 "target_role_description": request.target_role_description,
-                "candidate": request.candidate.model_dump(),
+                "candidate": request.candidate.model_dump(mode="json"),
                 "initial_response": session.messages[-1].content if session.messages else None,
-                "initial_decision_trace": trace.model_dump() if trace else None
+                "initial_decision_trace": trace.model_dump(mode="json") if trace else None
             })
         except Exception as err:
             LOGGER.warning(f"Failed to log start interaction: {err}")
@@ -244,7 +244,7 @@ async def conversation_turn(
                 "session_id": str(request.session.conversation_id),
                 "candidate_reply": request.candidate_reply,
                 "agent_response": response.agent_message.content if response.agent_message else None,
-                "decision_trace": response.decision_trace.model_dump() if response.decision_trace else None
+                "decision_trace": response.decision_trace.model_dump(mode="json") if response.decision_trace else None
             })
         except Exception as err:
             LOGGER.warning(f"Failed to log turn interaction: {err}")
