@@ -78,6 +78,10 @@ class RetrievalSettings(StrictModel):
     max_fact_candidates: int = Field(ge=1, le=100)
 
 
+class DatabaseSettings(StrictModel):
+    mongodb_uri: str = Field(min_length=1)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="forbid", frozen=True)
 
@@ -86,6 +90,7 @@ class Settings(BaseSettings):
     openrouter: OpenRouterSettings
     runtime: RuntimeSettings
     retrieval: RetrievalSettings
+    database: DatabaseSettings
 
     @field_validator("runtime", mode="after")
     @classmethod
@@ -151,6 +156,9 @@ def default_settings_dict() -> dict[str, object]:
             "min_score": 0.05,
             "reuse_penalty": 0.15,
             "max_fact_candidates": 20,
+        },
+        "database": {
+            "mongodb_uri": "mongodb://localhost:27017/hirewire",
         },
     }
 

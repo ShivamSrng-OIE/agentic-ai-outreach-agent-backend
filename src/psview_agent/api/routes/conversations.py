@@ -1,8 +1,13 @@
 """Conversation routes."""
 
+import os
+import json
+import logging
+import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends
+import httpx
+from fastapi import APIRouter, Body, Depends, Header, Request
 
 from psview_agent.api.dependencies import (
     get_agent_configuration_service,
@@ -18,6 +23,60 @@ from psview_agent.domain.api import (
 from psview_agent.services.agent_configuration import AgentConfigurationService
 from psview_agent.services.conversation_start import ConversationStartService
 from psview_agent.services.conversation_turn import ConversationTurnService
+
+LOGGER = logging.getLogger("psview_agent.api.routes.conversations")
+
+def get_client_ip(request: Request) -> str:
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    x_real_ip = request.headers.get("x-real-ip")
+    if x_real_ip:
+        return x_real_ip.strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+
+def is_private_ip(ip: str) -> bool:
+    if ip in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
+        return True
+    if ip.startswith("10.") or ip.startswith("192.168."):
+        return True
+    if ip.startswith("172."):
+        try:
+            parts = ip.split(".")
+            if len(parts) >= 2:
+                second_octet = int(parts[1])
+                return 16 <= second_octet <= 31
+        except ValueError:
+            pass
+    return False
+
+
+async def get_ip_location(ip: str, api_key: str | None) -> dict[str, object] | None:
+    if not api_key:
+        return None
+    url = f"https://ipapi.co/{ip}/json/"
+    if is_private_ip(ip):
+        url = "https://ipapi.co/json/"
+    url += f"?key={api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "error" not in data:
+                    return {
+                        "ip": data.get("ip"),
+                        "city": data.get("city"),
+                        "region": data.get("region"),
+                        "country": data.get("country_name"),
+                        "lat": data.get("latitude"),
+                        "lon": data.get("longitude")
+                    }
+    except Exception as err:
+        LOGGER.warning(f"Failed to geolocate IP {ip}: {err}")
+    return None
+
 
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 
@@ -94,6 +153,9 @@ async def start_conversation(
         AgentConfigurationService,
         Depends(get_agent_configuration_service),
     ],
+    fastapi_request: Request,
+    x_user_id: Annotated[str | None, Header(alias="X-User-ID")] = None,
+    x_user_location: Annotated[str | None, Header(alias="X-User-Location")] = None,
 ) -> StartConversationResponse:
     configuration = request.configuration
     if configuration is None:
@@ -105,6 +167,39 @@ async def start_conversation(
         target_role=request.target_role,
         target_role_description=request.target_role_description,
     )
+
+    db = fastapi_request.app.state.mongodb
+    if db is not None:
+        try:
+            location = None
+            if x_user_location:
+                try:
+                    location = json.loads(x_user_location)
+                except Exception:
+                    location = {"raw": x_user_location}
+
+            if not location or not location.get("city"):
+                ip = get_client_ip(fastapi_request)
+                api_key = os.getenv("IPAPI_KEY")
+                resolved_location = await get_ip_location(ip, api_key)
+                if resolved_location:
+                    location = resolved_location
+
+            await db.interactions.insert_one({
+                "user_id": x_user_id,
+                "location": location,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc),
+                "action": "start",
+                "session_id": str(session.conversation_id),
+                "target_role": request.target_role,
+                "target_role_description": request.target_role_description,
+                "candidate": request.candidate.model_dump(),
+                "initial_response": session.messages[-1].content if session.messages else None,
+                "initial_decision_trace": trace.model_dump() if trace else None
+            })
+        except Exception as err:
+            LOGGER.warning(f"Failed to log start interaction: {err}")
+
     return StartConversationResponse(session=session, initial_decision_trace=trace)
 
 
@@ -115,8 +210,43 @@ async def conversation_turn(
         ConversationTurnService,
         Depends(get_conversation_turn_service),
     ],
+    fastapi_request: Request,
+    x_user_id: Annotated[str | None, Header(alias="X-User-ID")] = None,
+    x_user_location: Annotated[str | None, Header(alias="X-User-Location")] = None,
 ) -> ConversationTurnResponse:
-    return await service.process_turn(
+    response = await service.process_turn(
         session=request.session,
         candidate_reply=request.candidate_reply,
     )
+
+    db = fastapi_request.app.state.mongodb
+    if db is not None:
+        try:
+            location = None
+            if x_user_location:
+                try:
+                    location = json.loads(x_user_location)
+                except Exception:
+                    location = {"raw": x_user_location}
+
+            if not location or not location.get("city"):
+                ip = get_client_ip(fastapi_request)
+                api_key = os.getenv("IPAPI_KEY")
+                resolved_location = await get_ip_location(ip, api_key)
+                if resolved_location:
+                    location = resolved_location
+
+            await db.interactions.insert_one({
+                "user_id": x_user_id,
+                "location": location,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc),
+                "action": "turn",
+                "session_id": str(request.session.conversation_id),
+                "candidate_reply": request.candidate_reply,
+                "agent_response": response.agent_message.content if response.agent_message else None,
+                "decision_trace": response.decision_trace.model_dump() if response.decision_trace else None
+            })
+        except Exception as err:
+            LOGGER.warning(f"Failed to log turn interaction: {err}")
+
+    return response

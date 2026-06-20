@@ -30,6 +30,25 @@ def build_lifespan() -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
         from psview_agent.services.conversation_start import ConversationStartService
         from psview_agent.services.conversation_turn import ConversationTurnService
 
+        import logging
+        logger = logging.getLogger("psview_agent.core.lifespan")
+
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from psview_agent.core.config import AppEnvironment
+
+        mongodb_client = None
+        mongodb = None
+        if settings.app.env is not AppEnvironment.TEST:
+            try:
+                mongodb_client = AsyncIOMotorClient(settings.database.mongodb_uri)
+                try:
+                    mongodb = mongodb_client.get_default_database()
+                except Exception:
+                    mongodb = mongodb_client["hirewire"]
+                logger.info("MongoDB client connected successfully")
+            except Exception as err:
+                logger.warning(f"Failed to connect to MongoDB: {err}")
+
         client = create_model_client(settings)
         gateway = OpenAICompatibleModelGateway(client=client, settings=settings)
         retriever = LexicalEvidenceRetriever(settings=settings.retrieval)
@@ -52,11 +71,15 @@ def build_lifespan() -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
         app.state.conversation_start_service = start_service
         app.state.conversation_turn_service = turn_service
         app.state.graph = graph
+        app.state.mongodb_client = mongodb_client
+        app.state.mongodb = mongodb
         app.state.ready = True
 
         yield
 
         app.state.ready = False
         await client.close()
+        if mongodb_client is not None:
+            mongodb_client.close()
 
     return lifespan

@@ -19,6 +19,7 @@ def test_load_settings_from_yaml_and_env(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setenv("CONFIG_FILE", str(config))
     monkeypatch.setenv("MODEL_API_KEY", "key-123")
     monkeypatch.setenv("MODEL_NAME", "model-123")
+    monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017/test")
     monkeypatch.chdir(tmp_path)
 
     loaded = load_settings()
@@ -35,6 +36,7 @@ def test_shell_env_wins_over_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("CONFIG_FILE", str(config))
     monkeypatch.setenv("MODEL_API_KEY", "key-123")
     monkeypatch.setenv("MODEL_NAME", "shell-model")
+    monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017/test")
     monkeypatch.chdir(tmp_path)
 
     loaded = load_settings()
@@ -60,6 +62,7 @@ def test_invalid_yaml_shape_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("CONFIG_FILE", str(config))
     monkeypatch.setenv("MODEL_API_KEY", "key-123")
     monkeypatch.setenv("MODEL_NAME", "model-123")
+    monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017/test")
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(InvalidConfigurationError):
@@ -106,12 +109,15 @@ def test_production_wildcard_cors_fails(tmp_path: Path, monkeypatch: pytest.Monk
             "  min_score: 0.05\n"
             "  reuse_penalty: 0.15\n"
             "  max_fact_candidates: 20\n"
+            "database:\n"
+            "  mongodb_uri: ${MONGODB_URI}\n"
         ),
         encoding="utf-8",
     )
     monkeypatch.setenv("CONFIG_FILE", str(config))
     monkeypatch.setenv("MODEL_API_KEY", "key-123")
     monkeypatch.setenv("MODEL_NAME", "model-123")
+    monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017/test")
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(InvalidConfigurationError):

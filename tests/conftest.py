@@ -51,6 +51,8 @@ def write_test_config(path: Path) -> None:
             "  min_score: 0.05\n"
             "  reuse_penalty: 0.15\n"
             "  max_fact_candidates: 20\n"
+            "database:\n"
+            "  mongodb_uri: ${MONGODB_URI}\n"
         ),
         encoding="utf-8",
     )
@@ -59,6 +61,7 @@ def write_test_config(path: Path) -> None:
 @pytest.fixture
 def config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     config = tmp_path / "config.yaml"
+    monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017/hirewire_test")
     write_test_config(config)
     monkeypatch.setenv("CONFIG_FILE", str(config))
     monkeypatch.setenv("MODEL_API_KEY", "test-key")
