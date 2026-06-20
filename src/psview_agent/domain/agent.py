@@ -85,8 +85,7 @@ class OutreachMessageDraft(StrictModel):
         derived_ids = _sorted_unique_ids(
             [fact_id for claim in self.supported_claims for fact_id in claim.evidence_fact_ids]
         )
-        if derived_ids:
-            object.__setattr__(self, "company_fact_ids_used", derived_ids)
+        object.__setattr__(self, "company_fact_ids_used", derived_ids)
         return self
 
 

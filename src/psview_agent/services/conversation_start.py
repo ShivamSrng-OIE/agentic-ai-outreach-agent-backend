@@ -29,7 +29,7 @@ from psview_agent.domain.enums import (
     OutreachStage,
     Sentiment,
 )
-from psview_agent.domain.evaluation import SupportedClaim
+from psview_agent.domain.evaluation import SupportedClaim, _sorted_unique_ids
 from psview_agent.domain.retrieval import RetrievedEvidence
 from psview_agent.integrations.models.protocol import ModelGateway
 from psview_agent.retrieval.protocol import EvidenceRetriever
@@ -740,7 +740,15 @@ class ConversationStartService:
             if not repaired_ids:
                 continue
             repaired_claims.append(claim.model_copy(update={"evidence_fact_ids": repaired_ids}))
-        return message.model_copy(update={"supported_claims": repaired_claims})
+        derived_ids = _sorted_unique_ids(
+            [fact_id for claim in repaired_claims for fact_id in claim.evidence_fact_ids]
+        )
+        return message.model_copy(
+            update={
+                "supported_claims": repaired_claims,
+                "company_fact_ids_used": derived_ids,
+            }
+        )
 
     def _repair_claim_evidence_ids(
         self,
