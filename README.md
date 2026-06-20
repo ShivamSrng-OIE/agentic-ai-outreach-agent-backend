@@ -1,3 +1,14 @@
+---
+title: Hirewire Backend
+emoji: ⚡
+colorFrom: pink
+colorTo: purple
+sdk: docker
+pinned: false
+license: mit
+short_description: 'Stateless FastAPI backend API for the HireWire AI Recruiter '
+---
+
 # The Recruiting Agent Magic (Backend)
 
 Welcome to the brains of the Recruiting Agent! This is where the magic happens. Think of this like a smart robot librarian that reads your company notes, learns how to speak like you, and writes messages to people you want to hire.
