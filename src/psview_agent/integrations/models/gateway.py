@@ -404,12 +404,21 @@ class OpenAICompatibleModelGateway(ModelGateway):
             raise ModelIncompleteResponseError("provider returned empty content")
         return content
 
+    def _clean_json_text(self, content: str) -> str:
+        content = content.strip()
+        first_brace = content.find('{')
+        last_brace = content.rfind('}')
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            return content[first_brace:last_brace + 1].strip()
+        return content
+
     def _parse_content_as_model(self, *, content: str, output_model: type[TModel]) -> TModel:
+        cleaned_content = self._clean_json_text(content)
         try:
-            return output_model.model_validate_json(content)
+            return output_model.model_validate_json(cleaned_content)
         except ValidationError as exc:
             repaired = self._attempt_repair(
-                content=content,
+                content=cleaned_content,
                 errors=str(exc),
                 output_model=output_model,
             )
@@ -432,12 +441,91 @@ class OpenAICompatibleModelGateway(ModelGateway):
             return None
         if not isinstance(raw, dict):
             return None
+
+        import re
+        from enum import Enum
+
+        # 1. Map camelCase and kebab-case keys to snake_case
+        def to_snake(name: str) -> str:
+            s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+            s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+            return s2.replace('-', '_')
+
+        normalized_raw = {}
+        for k, v in raw.items():
+            normalized_raw[to_snake(k)] = v
+        raw = normalized_raw
+
+        # 2. Drop extra keys to avoid validation issues with extra="forbid"
         for key in list(raw.keys()):
             if key not in output_model.model_fields:
                 raw.pop(key)
+
+        # 3. Heal missing or incorrect value types
         for field_name, field_info in output_model.model_fields.items():
-            if field_name not in raw and field_info.default is not None:
-                raw[field_name] = field_info.default
+            if field_name not in raw:
+                # Fill default values or factories
+                if field_info.default is not None:
+                    raw[field_name] = field_info.default
+                elif field_info.default_factory is not None:
+                    raw[field_name] = field_info.default_factory()
+                else:
+                    # Provide type-based fallbacks for missing fields
+                    annotation = field_info.annotation
+                    if annotation is str:
+                        raw[field_name] = "N/A"
+                    elif annotation is float or annotation is int:
+                        raw[field_name] = 0
+                    elif annotation is bool:
+                        raw[field_name] = False
+                    elif hasattr(annotation, "__origin__") and annotation.__origin__ is list:
+                        raw[field_name] = []
+                    elif isinstance(annotation, type) and issubclass(annotation, Enum):
+                        raw[field_name] = list(annotation)[0]
+            else:
+                val = raw[field_name]
+                annotation = field_info.annotation
+
+                # Wrap non-list elements if list is expected
+                if hasattr(annotation, "__origin__") and annotation.__origin__ is list:
+                    if not isinstance(val, list):
+                        if val is None:
+                            raw[field_name] = []
+                        else:
+                            raw[field_name] = [str(val)]
+                
+                # Coerce numeric values
+                elif annotation is float:
+                    try:
+                        raw[field_name] = float(val)
+                    except (ValueError, TypeError):
+                        raw[field_name] = 0.0
+                elif annotation is int:
+                    try:
+                        raw[field_name] = int(val)
+                    except (ValueError, TypeError):
+                        raw[field_name] = 0
+
+                # Coerce boolean values
+                elif annotation is bool and not isinstance(val, bool):
+                    if isinstance(val, str):
+                        raw[field_name] = val.lower() in ("true", "1", "yes")
+                    else:
+                        raw[field_name] = bool(val)
+
+                # Coerce enum values (match string to member value or name case-insensitively)
+                elif isinstance(annotation, type) and issubclass(annotation, Enum):
+                    if isinstance(val, str):
+                        matched = None
+                        for member in annotation:
+                            if member.value.lower() == val.lower() or member.name.lower() == val.lower().replace('-', '_'):
+                                matched = member
+                                break
+                        if matched is not None:
+                            raw[field_name] = matched
+                        else:
+                            raw[field_name] = list(annotation)[0]
+
         try:
             return output_model.model_validate(raw)
         except ValidationError:
