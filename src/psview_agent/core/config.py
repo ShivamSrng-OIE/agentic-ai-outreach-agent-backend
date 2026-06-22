@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from functools import lru_cache
+from contextvars import ContextVar
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,8 @@ class AppEnvironment(StrEnum):
 class ModelProvider(StrEnum):
     OPENROUTER = "openrouter"
     NVIDIA = "nvidia"
+    GEMINI = "gemini"
+    OPENAI = "openai"
 
 
 class StructuredOutputMode(StrEnum):
@@ -27,6 +30,18 @@ class StructuredOutputMode(StrEnum):
     JSON_SCHEMA = "json_schema"
     JSON_OBJECT = "json_object"
     PROMPT_JSON = "prompt_json"
+
+
+class ModelOverride(StrictModel):
+    provider: ModelProvider
+    api_key: str
+    model_name: str
+    general_chat_model_name: str | None = None
+    structured_json_model_name: str | None = None
+    coding_backend_model_name: str | None = None
+
+
+model_override_var: ContextVar[ModelOverride | None] = ContextVar("model_override", default=None)
 
 
 class AppSettings(StrictModel):

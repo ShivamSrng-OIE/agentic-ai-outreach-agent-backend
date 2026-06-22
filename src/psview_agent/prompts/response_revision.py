@@ -32,10 +32,10 @@ def build_response_revision_prompts(
         "Revise the candidate-facing response once.\n"
         f"{PROMPT_SECURITY_INSTRUCTION}\n"
         "Fix only the identified failures, preserve valid content, keep the "
-        "selected action, and use only supported evidence. Keep supported_claims aligned "
-        "with the revised message. Every factual company claim must cite exact evidence IDs "
-        "from decision.company_fact_ids_to_use, and unsupported or uncited claims must be "
-        "removed instead of guessed."
+        "selected action, and use only supported evidence and the trusted role description (in role_context). "
+        "Keep supported_claims aligned with the revised message. Every factual company claim (based on company evidence) "
+        "must cite exact evidence IDs from decision.company_fact_ids_to_use. Claims directly based on the trusted role description "
+        "do not need evidence IDs and should not be cited in supported_claims. Remove any guessed or unsupported company claims."
     )
     user_prompt = untrusted_json_block(
         {

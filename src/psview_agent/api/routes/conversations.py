@@ -149,6 +149,22 @@ async def log_error_interaction(
             if resolved_location:
                 location = resolved_location
 
+        model_provider = None
+        model_name = None
+        try:
+            from psview_agent.core.config import model_override_var
+            override = model_override_var.get()
+            if override:
+                model_provider = override.provider.value
+                model_name = override.model_name
+            else:
+                settings = fastapi_request.app.state.settings
+                if settings:
+                    model_provider = settings.model.provider.value
+                    model_name = settings.model.model_name
+        except Exception:
+            pass
+
         await db.interactions.insert_one({
             "user_id": x_user_id,
             "location": location,
@@ -161,7 +177,9 @@ async def log_error_interaction(
             "error_code": error_code,
             "message": friendly_msg,
             "error_type": exc.__class__.__name__,
-            "details": [str(d) for d in getattr(exc, "details", [])]
+            "details": [str(d) for d in getattr(exc, "details", [])],
+            "model_provider": model_provider,
+            "model_name": model_name,
         })
     except Exception as err:
         LOGGER.warning(f"Failed to log error interaction: {err}")
@@ -287,6 +305,22 @@ async def start_conversation(
                 if resolved_location:
                     location = resolved_location
 
+            model_provider = None
+            model_name = None
+            try:
+                from psview_agent.core.config import model_override_var
+                override = model_override_var.get()
+                if override:
+                    model_provider = override.provider.value
+                    model_name = override.model_name
+                else:
+                    settings = fastapi_request.app.state.settings
+                    if settings:
+                        model_provider = settings.model.provider.value
+                        model_name = settings.model.model_name
+            except Exception:
+                pass
+
             await db.interactions.insert_one({
                 "user_id": x_user_id,
                 "location": location,
@@ -297,7 +331,9 @@ async def start_conversation(
                 "target_role_description": request.target_role_description,
                 "candidate": request.candidate.model_dump(mode="json"),
                 "initial_response": session.messages[-1].content if session.messages else None,
-                "initial_decision_trace": trace.model_dump(mode="json") if trace else None
+                "initial_decision_trace": trace.model_dump(mode="json") if trace else None,
+                "model_provider": model_provider,
+                "model_name": model_name,
             })
         except Exception as err:
             LOGGER.warning(f"Failed to log start interaction: {err}")
@@ -351,6 +387,22 @@ async def conversation_turn(
                 if resolved_location:
                     location = resolved_location
 
+            model_provider = None
+            model_name = None
+            try:
+                from psview_agent.core.config import model_override_var
+                override = model_override_var.get()
+                if override:
+                    model_provider = override.provider.value
+                    model_name = override.model_name
+                else:
+                    settings = fastapi_request.app.state.settings
+                    if settings:
+                        model_provider = settings.model.provider.value
+                        model_name = settings.model.model_name
+            except Exception:
+                pass
+
             await db.interactions.insert_one({
                 "user_id": x_user_id,
                 "location": location,
@@ -361,7 +413,9 @@ async def conversation_turn(
                 "target_role": request.session.target_role,
                 "candidate_reply": request.candidate_reply,
                 "agent_response": response.agent_message.content if response.agent_message else None,
-                "decision_trace": response.decision_trace.model_dump(mode="json") if response.decision_trace else None
+                "decision_trace": response.decision_trace.model_dump(mode="json") if response.decision_trace else None,
+                "model_provider": model_provider,
+                "model_name": model_name,
             })
         except Exception as err:
             LOGGER.warning(f"Failed to log turn interaction: {err}")

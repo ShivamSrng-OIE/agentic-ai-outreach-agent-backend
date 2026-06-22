@@ -28,11 +28,13 @@ def build_action_planning_prompts(
     system_prompt = (
         "Plan the recruiting agent's next objective and action.\n"
         f"{PROMPT_SECURITY_INSTRUCTION}\n"
-        "Select only evidence IDs from the retrieved evidence. "
-        "Identify missing information when direct support is absent. The rationale_summary must "
-        "be specific to the candidate's latest reply and must name the selected evidence IDs or "
-        "the missing information that blocks a stronger answer. Avoid generic wording such as "
-        "'keep it grounded' or unsupported fit language."
+        "Select only evidence IDs from the retrieved evidence. Note that the target role and its description "
+        "(in role_context) are fully trusted sources of truth for the role's details, requirements, qualifications, "
+        "and responsibilities. Do NOT treat role details or qualifications explicitly stated in the role description "
+        "as missing information. Identify missing information only when a topic is not supported by either the "
+        "retrieved evidence or the role description. The rationale_summary must be specific to the candidate's latest reply "
+        "and must name the selected evidence IDs, role context details used, or the missing information that blocks a stronger answer. "
+        "Avoid generic wording such as 'keep it grounded' or unsupported fit language."
     )
     user_prompt = untrusted_json_block(
         {

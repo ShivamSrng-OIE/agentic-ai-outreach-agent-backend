@@ -12,7 +12,7 @@ def mode_sequence(
     """Return the allowed fallback sequence."""
     if preferred is not StructuredOutputMode.AUTO:
         return [preferred]
-    if provider is ModelProvider.OPENROUTER:
+    if provider in (ModelProvider.OPENROUTER, ModelProvider.OPENAI):
         return [
             StructuredOutputMode.JSON_SCHEMA,
             StructuredOutputMode.JSON_OBJECT,

@@ -1,6 +1,5 @@
 ---
 title: Hirewire Backend
-emoji: ⚡
 colorFrom: pink
 colorTo: purple
 sdk: docker

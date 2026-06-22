@@ -256,3 +256,25 @@ def test_text_helpers_normalize_and_split_content() -> None:
     assert sanitize_generated_text("Hi\u00a0there\u2014I\u2019m ready\u2026") == (
         "Hi there-I'm ready..."
     )
+
+
+def test_model_override_and_modes() -> None:
+    from psview_agent.core.config import ModelOverride, ModelProvider, model_override_var
+    gemini_modes = mode_sequence(ModelProvider.GEMINI, StructuredOutputMode.AUTO)
+    openai_modes = mode_sequence(ModelProvider.OPENAI, StructuredOutputMode.AUTO)
+    
+    assert gemini_modes == [StructuredOutputMode.JSON_OBJECT, StructuredOutputMode.PROMPT_JSON]
+    assert openai_modes == [
+        StructuredOutputMode.JSON_SCHEMA,
+        StructuredOutputMode.JSON_OBJECT,
+        StructuredOutputMode.PROMPT_JSON,
+    ]
+    
+    override = ModelOverride(
+        provider=ModelProvider.GEMINI,
+        api_key="override-key",
+        model_name="gemini-flash-test",
+    )
+    assert override.provider == ModelProvider.GEMINI
+    assert override.api_key == "override-key"
+    assert override.model_name == "gemini-flash-test"

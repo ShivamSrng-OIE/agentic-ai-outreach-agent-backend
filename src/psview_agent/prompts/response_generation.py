@@ -27,13 +27,14 @@ def build_response_generation_prompts(
     system_prompt = (
         "Generate a grounded candidate-facing response.\n"
         f"{PROMPT_SECURITY_INSTRUCTION}\n"
-        "Follow the selected action, stay in persona, use only selected "
-        "evidence, remain concise, and ask at most one question. Return "
-        "supported_claims for each factual company claim you make. Each "
-        "supported claim must quote or closely paraphrase one claim from the "
-        "message and cite only exact evidence IDs from decision.company_fact_ids_to_use. "
-        "If a sentence is purely courtesy, transition, or AI disclosure without a company "
-        "fact, do not include it in supported_claims."
+        "Follow the selected action, stay in persona, use only selected evidence and the trusted role description "
+        "(in role_context), remain concise, and ask at most one question. The role title and description are "
+        "fully trusted sources of truth for role requirements and details. You can freely state any requirements, qualifications, "
+        "or details explicitly mentioned in the role description. Return supported_claims only for factual company claims "
+        "made that are based on company evidence facts (citing exact evidence IDs from decision.company_fact_ids_to_use). "
+        "Do NOT create supported_claims or cite evidence IDs for claims that are directly supported by the role description itself, "
+        "as they are trusted implicitly. If a sentence is purely courtesy, transition, AI disclosure, or directly from the "
+        "trusted role description, do not include it in supported_claims."
     )
     user_prompt = untrusted_json_block(
         {

@@ -239,3 +239,75 @@ async def test_api_routes_error_persistence_logging(client: AsyncClient, app, mo
     assert call_args["error_code"] == "turn_limit_reached"
     assert "limit" in call_args["message"].lower()
 
+
+@pytest.mark.anyio
+async def test_model_override_middleware(client: AsyncClient, app) -> None:
+    from psview_agent.core.config import model_override_var
+    
+    # Add a temporary test endpoint to verify the contextvar
+    @app.get("/api/test-context-override")
+    async def test_context_override():
+        override = model_override_var.get()
+        if override:
+            return {
+                "provider": override.provider.value,
+                "model_name": override.model_name,
+                "api_key": override.api_key
+            }
+        return {"override": None}
+        
+    # Send request with headers
+    headers = {
+        "X-Model-Provider": "gemini",
+        "X-Model-Name": "gemini-2.5-flash",
+        "X-Model-Api-Key": "my-gemini-key"
+    }
+    
+    resp = await client.get("/api/test-context-override", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "provider": "gemini",
+        "model_name": "gemini-2.5-flash",
+        "api_key": "my-gemini-key"
+    }
+    
+    # Send request without headers
+    resp_no_headers = await client.get("/api/test-context-override")
+    assert resp_no_headers.status_code == 200
+    assert resp_no_headers.json() == {"override": None}
+
+
+@pytest.mark.anyio
+async def test_model_override_middleware_and_test_connection(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Mock AsyncOpenAI call inside test_connection
+    mock_create = AsyncMock()
+    mock_client_instance = MagicMock()
+    mock_client_instance.chat = MagicMock()
+    mock_client_instance.chat.completions = MagicMock()
+    mock_client_instance.chat.completions.create = mock_create
+    mock_client_instance.close = AsyncMock()
+    
+    mock_init = MagicMock(return_value=mock_client_instance)
+    monkeypatch.setattr("psview_agent.api.routes.agents.AsyncOpenAI", mock_init)
+    
+    # Test connection request payload
+    test_payload = {
+        "provider": "openai",
+        "model_name": "gpt-4o-test",
+        "api_key": "my-custom-key"
+    }
+    
+    response = await client.post("/api/v1/agents/test-connection", json=test_payload)
+    assert response.status_code == 200
+    assert response.json() == {"status": "success", "message": "Connection verified successfully!"}
+    
+    # Ensure it initialized with the correct base url and api key
+    mock_init.assert_called_once_with(
+        api_key="my-custom-key",
+        base_url="https://api.openai.com/v1",
+        timeout=10.0,
+        max_retries=0,
+        default_headers={},
+    )
+
+

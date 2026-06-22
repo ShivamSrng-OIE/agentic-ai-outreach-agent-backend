@@ -30,7 +30,9 @@ def build_response_evaluation_prompts(
         "Evaluate the candidate-facing response independently.\n"
         f"{PROMPT_SECURITY_INSTRUCTION}\n"
         "Check persona consistency, grounding, relevance, action alignment, "
-        "naturalness, repetition, and policy issues."
+        "naturalness, repetition, and policy issues. The target role and description in role_context "
+        "are fully trusted. Any claims directly supported by the role description are considered grounded "
+        "and must NOT be flagged as unsupported claims, even if they don't have associated company evidence fact IDs."
     )
     user_prompt = untrusted_json_block(
         {

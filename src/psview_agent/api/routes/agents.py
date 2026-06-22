@@ -6,7 +6,8 @@ import logging
 import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request, Body
+from openai import AsyncOpenAI
 
 from psview_agent.api.dependencies import get_agent_configuration_service
 from psview_agent.domain.api import ConfigureAgentRequest, ConfigureAgentResponse
@@ -16,6 +17,55 @@ from psview_agent.api.routes.conversations import get_client_ip, get_ip_location
 LOGGER = logging.getLogger("psview_agent.api.routes.agents")
 
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
+
+
+@router.post("/test-connection")
+async def test_connection(
+    request: Request,
+    provider: str = Body(..., embed=True),
+    model_name: str = Body(..., embed=True),
+    api_key: str = Body(..., embed=True),
+) -> dict[str, object]:
+    """Test connection to an AI provider with the given api key and model."""
+    provider_str = provider.lower()
+    base_url = ""
+    if provider_str == "openai":
+        base_url = "https://api.openai.com/v1"
+    elif provider_str == "gemini":
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    elif provider_str == "openrouter":
+        base_url = "https://openrouter.ai/api/v1"
+    elif provider_str == "nvidia":
+        base_url = "https://integrate.api.nvidia.com/v1"
+    else:
+        return {"status": "error", "message": f"Unsupported provider: {provider}"}
+
+    headers = {}
+    if provider_str == "openrouter":
+        settings = request.app.state.settings
+        if settings.openrouter.site_url is not None:
+            headers["HTTP-Referer"] = str(settings.openrouter.site_url)
+        if settings.openrouter.app_name:
+            headers["X-OpenRouter-Title"] = settings.openrouter.app_name
+
+    try:
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=10.0,
+            max_retries=0,
+            default_headers=headers,
+        )
+        # Make a tiny chat completions call to verify
+        await client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": "Ping"}],
+            max_tokens=2,
+        )
+        await client.close()
+        return {"status": "success", "message": "Connection verified successfully!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @router.post("/configure", response_model=ConfigureAgentResponse)
@@ -48,13 +98,31 @@ async def configure_agent(
                 if resolved_location:
                     location = resolved_location
 
+            model_provider = None
+            model_name = None
+            try:
+                from psview_agent.core.config import model_override_var
+                override = model_override_var.get()
+                if override:
+                    model_provider = override.provider.value
+                    model_name = override.model_name
+                else:
+                    settings = fastapi_request.app.state.settings
+                    if settings:
+                        model_provider = settings.model.provider.value
+                        model_name = settings.model.model_name
+            except Exception:
+                pass
+
             await db.interactions.insert_one({
                 "user_id": x_user_id,
                 "location": location,
                 "timestamp": datetime.datetime.now(datetime.timezone.utc),
                 "action": "configure",
                 "company_context": request.company_context.model_dump(mode="json"),
-                "configuration": configuration.model_dump(mode="json")
+                "configuration": configuration.model_dump(mode="json"),
+                "model_provider": model_provider,
+                "model_name": model_name,
             })
         except Exception as err:
             LOGGER.warning(f"Failed to log configure interaction: {err}")

@@ -58,6 +58,45 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             },
         )
         return response
+    
+
+class ModelOverrideMiddleware(BaseHTTPMiddleware):
+    """Intercept model configuration override headers and set the ContextVar."""
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        provider = request.headers.get("X-Model-Provider")
+        model_name = request.headers.get("X-Model-Name")
+        api_key = request.headers.get("X-Model-Api-Key")
+        general_chat_model_name = request.headers.get("X-Model-General-Chat-Name")
+        structured_json_model_name = request.headers.get("X-Model-Structured-Json-Name")
+        coding_backend_model_name = request.headers.get("X-Model-Coding-Backend-Name")
+
+        token = None
+        if provider and model_name and api_key:
+            from psview_agent.core.config import ModelOverride, ModelProvider, model_override_var
+            try:
+                override = ModelOverride(
+                    provider=ModelProvider(provider.lower()),
+                    api_key=api_key,
+                    model_name=model_name,
+                    general_chat_model_name=general_chat_model_name,
+                    structured_json_model_name=structured_json_model_name,
+                    coding_backend_model_name=coding_backend_model_name,
+                )
+                token = model_override_var.set(override)
+            except Exception as e:
+                LOGGER.warning(f"Failed to set model override from headers: {e}")
+
+        try:
+            return await call_next(request)
+        finally:
+            if token is not None:
+                from psview_agent.core.config import model_override_var
+                model_override_var.reset(token)
 
 
 class MaxRequestBodySizeMiddleware:
@@ -164,6 +203,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
 
 def install_http_middleware(app: FastAPI, *, default_max_request_body_bytes: int) -> None:
     """Install core HTTP middleware."""
+    app.add_middleware(ModelOverrideMiddleware)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(DynamicCORSMiddleware)
     app.add_middleware(

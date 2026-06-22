@@ -271,7 +271,7 @@ async def test_generate_candidate_response_sanitizes_text_and_derives_ids() -> N
 
 
 @pytest.mark.asyncio
-async def test_plan_next_action_uses_structured_json_workload() -> None:
+async def test_plan_next_action_uses_coding_backend_workload() -> None:
     gateway = OpenAICompatibleModelGateway(
         client=cast(AsyncOpenAI, object()),
         settings=_settings(),
@@ -306,7 +306,7 @@ async def test_plan_next_action_uses_structured_json_workload() -> None:
         retrieved_evidence=[],
     )
 
-    assert seen_workloads == [ModelWorkload.STRUCTURED_JSON]
+    assert seen_workloads == [ModelWorkload.CODING_BACKEND]
 
 
 def test_gateway_repair_recursive_and_padding() -> None:

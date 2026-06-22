@@ -170,7 +170,7 @@ class OpenAICompatibleModelGateway(ModelGateway):
             schema_name="agent_decision",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            workload=ModelWorkload.STRUCTURED_JSON,
+            workload=ModelWorkload.CODING_BACKEND,
         )
 
     async def generate_candidate_response(
@@ -299,7 +299,11 @@ class OpenAICompatibleModelGateway(ModelGateway):
             except Exception as exc:
                 from instructor.core import InstructorRetryException
                 from pydantic import ValidationError as PydanticValidationError
-                if isinstance(exc, (InstructorRetryException, PydanticValidationError)):
+                import openai
+                
+                if isinstance(exc, InstructorRetryException) and isinstance(exc.__cause__, openai.APIError):
+                    mapped = map_openai_error(exc.__cause__)
+                elif isinstance(exc, (InstructorRetryException, PydanticValidationError)):
                     mapped = ModelInvalidOutputError(f"instructor structured output validation failed: {exc}")
                 else:
                     mapped = map_openai_error(exc)
@@ -321,6 +325,15 @@ class OpenAICompatibleModelGateway(ModelGateway):
         )
 
     def _resolve_model_name(self, workload: ModelWorkload) -> str:
+        from psview_agent.core.config import model_override_var
+        override = model_override_var.get()
+        if override is not None:
+            if workload is ModelWorkload.GENERAL_CHAT:
+                return override.general_chat_model_name or override.model_name
+            if workload is ModelWorkload.CODING_BACKEND:
+                return override.coding_backend_model_name or override.model_name
+            return override.structured_json_model_name or override.model_name
+
         if workload is ModelWorkload.GENERAL_CHAT:
             return self._settings.model.general_chat_model_name or self._settings.model.model_name
         if workload is ModelWorkload.CODING_BACKEND:
@@ -329,8 +342,11 @@ class OpenAICompatibleModelGateway(ModelGateway):
 
     def _mode_attempts(self, model_name: str) -> list[StructuredOutputMode]:
         cached_mode = self._cached_modes.get(model_name)
+        from psview_agent.core.config import model_override_var
+        override = model_override_var.get()
+        provider = override.provider if override else self._settings.model.provider
         seq = mode_sequence(
-            self._settings.model.provider,
+            provider,
             self._settings.model.structured_output_mode,
         )
         if cached_mode is not None and cached_mode in seq:
@@ -359,62 +375,99 @@ class OpenAICompatibleModelGateway(ModelGateway):
         if mode in {StructuredOutputMode.JSON_OBJECT, StructuredOutputMode.PROMPT_JSON}:
             prompt_suffix = "\n" + prompt_json_instructions(output_model)
             
-        instructor_client = instructor.from_openai(self._client, mode=mode_map[mode])
+        from psview_agent.core.config import model_override_var
+        override = model_override_var.get()
         
-        try:
-            async with self._semaphore:
-                parsed = await instructor_client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt + prompt_suffix},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    response_model=output_model,
-                    temperature=self._settings.model.temperature,
-                    max_tokens=self._settings.model.max_output_tokens,
-                    max_retries=self._settings.model.repair_attempts,
-                    extra_body=self._settings.model.extra_body,
-                )
-            
-            LOGGER.info(
-                "Instructor model completion succeeded",
-                extra={
-                    "provider": self._settings.model.provider.value,
-                    "model_name": model_name,
-                    "structured_output_mode": mode.value,
-                },
+        client_to_use = self._client
+        temp_client = None
+        
+        if override is not None:
+            base_url = ""
+            if override.provider == "openai":
+                base_url = "https://api.openai.com/v1"
+            elif override.provider == "gemini":
+                base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+            elif override.provider == "openrouter":
+                base_url = "https://openrouter.ai/api/v1"
+            elif override.provider == "nvidia":
+                base_url = "https://integrate.api.nvidia.com/v1"
+
+            headers = {}
+            if override.provider == "openrouter":
+                if self._settings.openrouter.site_url is not None:
+                    headers["HTTP-Referer"] = str(self._settings.openrouter.site_url)
+                if self._settings.openrouter.app_name:
+                    headers["X-OpenRouter-Title"] = self._settings.openrouter.app_name
+
+            temp_client = AsyncOpenAI(
+                api_key=override.api_key,
+                base_url=base_url,
+                timeout=self._settings.model.timeout_seconds,
+                max_retries=self._settings.model.max_retries,
+                default_headers=headers,
             )
-            self._cached_modes[model_name] = mode
-            return sanitize_model_strings(parsed)
-        except Exception as exc:
-            # Extract raw response text if validation failed under Instructor
-            raw_content = None
-            if hasattr(exc, "last_completion") and exc.last_completion:
-                raw_content = getattr(exc.last_completion.choices[0].message, "content", None)
+            client_to_use = temp_client
+
+        try:
+            instructor_client = instructor.from_openai(client_to_use, mode=mode_map[mode])
             
-            if raw_content:
-                LOGGER.warning(
-                    "Instructor validation failed for model %s; attempting custom recursive repair. error: %s. content: %s",
+            try:
+                async with self._semaphore:
+                    parsed = await instructor_client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": system_prompt + prompt_suffix},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        response_model=output_model,
+                        temperature=self._settings.model.temperature,
+                        max_tokens=self._settings.model.max_output_tokens,
+                        max_retries=self._settings.model.repair_attempts,
+                        extra_body=self._settings.model.extra_body,
+                    )
+                
+                LOGGER.info(
+                    "Instructor model completion succeeded",
+                    extra={
+                        "provider": override.provider.value if override else self._settings.model.provider.value,
+                        "model_name": model_name,
+                        "structured_output_mode": mode.value,
+                    },
+                )
+                self._cached_modes[model_name] = mode
+                return sanitize_model_strings(parsed)
+            except Exception as exc:
+                # Extract raw response text if validation failed under Instructor
+                raw_content = None
+                if hasattr(exc, "last_completion") and exc.last_completion:
+                    raw_content = getattr(exc.last_completion.choices[0].message, "content", None)
+                
+                if raw_content:
+                    LOGGER.warning(
+                        "Instructor validation failed for model %s; attempting custom recursive repair. error: %s. content: %s",
+                        output_model.__name__,
+                        str(exc),
+                        raw_content,
+                    )
+                    repaired = self._attempt_repair(
+                        content=raw_content,
+                        errors=str(exc),
+                        output_model=output_model,
+                    )
+                    if repaired is not None:
+                        LOGGER.info("successfully repaired model %s via fallback repair", output_model.__name__)
+                        self._cached_modes[model_name] = mode
+                        return repaired
+                
+                LOGGER.error(
+                    "Instructor execution failed for model %s. error: %s",
                     output_model.__name__,
                     str(exc),
-                    raw_content,
                 )
-                repaired = self._attempt_repair(
-                    content=raw_content,
-                    errors=str(exc),
-                    output_model=output_model,
-                )
-                if repaired is not None:
-                    LOGGER.info("successfully repaired model %s via fallback repair", output_model.__name__)
-                    self._cached_modes[model_name] = mode
-                    return repaired
-            
-            LOGGER.error(
-                "Instructor execution failed for model %s. error: %s",
-                output_model.__name__,
-                str(exc),
-            )
-            raise
+                raise
+        finally:
+            if temp_client is not None:
+                await temp_client.close()
 
     def _clean_json_text(self, content: str) -> str:
         content = content.strip()
