@@ -8,7 +8,7 @@ from psview_agent.domain.agent import (
     CompanyAgentConfigurationDraft,
     OutreachPlanDraft,
 )
-from psview_agent.domain.candidate import CandidateProfile
+from psview_agent.domain.candidate import CandidateProfile, ExtractedCandidateProfile
 from psview_agent.domain.company import CompanyContextInput, SourceSegment
 from psview_agent.domain.conversation import ConversationMessage, ConversationState
 from psview_agent.domain.decisions import AgentDecision, AgentDecisionDraft, CandidateAnalysis
@@ -103,3 +103,9 @@ class ModelGateway(Protocol):
         evaluation: ResponseEvaluation | None,
         deterministic_violations: Sequence[str],
     ) -> GeneratedResponseDraft: ...
+
+    async def extract_profile_from_resume(
+        self,
+        *,
+        resume_text: str,
+    ) -> ExtractedCandidateProfile: ...

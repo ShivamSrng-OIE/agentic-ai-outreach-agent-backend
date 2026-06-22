@@ -39,6 +39,7 @@ class ModelOverride(StrictModel):
     general_chat_model_name: str | None = None
     structured_json_model_name: str | None = None
     coding_backend_model_name: str | None = None
+    resume_parsing_model_name: str | None = None
 
 
 model_override_var: ContextVar[ModelOverride | None] = ContextVar("model_override", default=None)
@@ -60,6 +61,7 @@ class ModelSettings(StrictModel):
     general_chat_model_name: str | None = Field(default=None, min_length=1, max_length=200)
     structured_json_model_name: str | None = Field(default=None, min_length=1, max_length=200)
     coding_backend_model_name: str | None = Field(default=None, min_length=1, max_length=200)
+    resume_parsing_model_name: str | None = Field(default=None, min_length=1, max_length=200)
     structured_output_mode: StructuredOutputMode
     timeout_seconds: float = Field(gt=0, le=300)
     max_retries: int = Field(ge=0, le=10)
@@ -107,12 +109,7 @@ class Settings(BaseSettings):
     retrieval: RetrievalSettings
     database: DatabaseSettings
 
-    @field_validator("runtime", mode="after")
-    @classmethod
-    def validate_allowed_origins(cls, value: RuntimeSettings) -> RuntimeSettings:
-        if not value.allowed_origins:
-            raise ValueError("allowed_origins must not be empty")
-        return value
+
 
     @model_validator(mode="after")
     def validate_provider_consistency(self) -> Settings:
@@ -143,6 +140,7 @@ def default_settings_dict() -> dict[str, object]:
             "general_chat_model_name": "openai/gpt-oss-120b:free",
             "structured_json_model_name": "openai/gpt-oss-120b:free",
             "coding_backend_model_name": "openai/gpt-oss-120b:free",
+            "resume_parsing_model_name": "openai/gpt-oss-120b:free",
             "structured_output_mode": "auto",
             "timeout_seconds": 45,
             "max_retries": 2,

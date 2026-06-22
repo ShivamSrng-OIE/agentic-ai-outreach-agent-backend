@@ -11,7 +11,7 @@ from psview_agent.domain.agent import (
     OutreachMessageDraft,
     OutreachPlanDraft,
 )
-from psview_agent.domain.candidate import CandidateProfile
+from psview_agent.domain.candidate import CandidateProfile, ExtractedCandidateProfile
 from psview_agent.domain.company import (
     CommunicationProfile,
     CompanyContextInput,
@@ -502,4 +502,34 @@ class FakeModelGateway(ModelGateway):
                 "Thanks for the question. I will stay grounded in the supplied company context."
             ),
             supported_claims=response.supported_claims,
+        )
+
+    async def extract_profile_from_resume(
+        self,
+        *,
+        resume_text: str,
+    ) -> ExtractedCandidateProfile:
+        scenario = self.scenarios.get("extract_profile_from_resume")
+        if isinstance(scenario, Exception):
+            raise scenario
+        if callable(scenario):
+            result = cast(Callable[..., object], scenario)(resume_text=resume_text)
+            return ExtractedCandidateProfile.model_validate(result)
+        
+        name = "John Doe"
+        current_role = "Software Engineer"
+        background_summary = "Experienced software developer."
+        
+        lines = [line.strip() for line in resume_text.split("\n") if line.strip()]
+        if lines:
+            name = lines[0]
+            if len(lines) > 1:
+                current_role = lines[1]
+            if len(lines) > 2:
+                background_summary = " ".join(lines[2:])
+                
+        return ExtractedCandidateProfile(
+            name=name,
+            current_role=current_role,
+            background_summary=background_summary[:500],
         )

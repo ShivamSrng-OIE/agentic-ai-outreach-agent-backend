@@ -122,3 +122,114 @@ def test_production_wildcard_cors_fails(tmp_path: Path, monkeypatch: pytest.Monk
 
     with pytest.raises(InvalidConfigurationError):
         load_settings()
+
+
+def test_empty_allowed_origins_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        (
+            "app:\n"
+            "  name: PSVIEW Recruiting Agent API\n"
+            "  env: development\n"
+            "  version: 0.1.0\n"
+            "  api_v1_prefix: /api/v1\n"
+            "  log_level: INFO\n"
+            "model:\n"
+            "  provider: openrouter\n"
+            "  api_key: ${MODEL_API_KEY}\n"
+            "  base_url: https://openrouter.ai/api/v1\n"
+            "  model_name: ${MODEL_NAME}\n"
+            "  structured_output_mode: auto\n"
+            "  timeout_seconds: 5\n"
+            "  max_retries: 1\n"
+            "  max_output_tokens: 600\n"
+            "  temperature: 0.2\n"
+            "  repair_attempts: 1\n"
+            "  concurrency_limit: 2\n"
+            "  extra_body: {}\n"
+            "openrouter:\n"
+            "  site_url: null\n"
+            "  app_name: PSVIEW Recruiting Agent\n"
+            "runtime:\n"
+            "  allowed_origins: []\n"
+            "  max_request_body_bytes: 100000\n"
+            "  max_history_messages: 20\n"
+            "  max_conversation_turns: 16\n"
+            "  max_response_characters: 1000\n"
+            "  max_revision_attempts: 1\n"
+            "  langgraph_recursion_limit: 20\n"
+            "retrieval:\n"
+            "  enabled: true\n"
+            "  top_k: 5\n"
+            "  min_score: 0.05\n"
+            "  reuse_penalty: 0.15\n"
+            "  max_fact_candidates: 20\n"
+            "database:\n"
+            "  mongodb_uri: ${MONGODB_URI}\n"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(config))
+    monkeypatch.setenv("MODEL_API_KEY", "key-123")
+    monkeypatch.setenv("MODEL_NAME", "model-123")
+    monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017/test")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(InvalidConfigurationError, match="List should have at least 1 item"):
+        load_settings()
+
+
+def test_openrouter_without_openrouter_url_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        (
+            "app:\n"
+            "  name: PSVIEW Recruiting Agent API\n"
+            "  env: development\n"
+            "  version: 0.1.0\n"
+            "  api_v1_prefix: /api/v1\n"
+            "  log_level: INFO\n"
+            "model:\n"
+            "  provider: openrouter\n"
+            "  api_key: ${MODEL_API_KEY}\n"
+            "  base_url: https://other-provider.ai/api/v1\n"
+            "  model_name: ${MODEL_NAME}\n"
+            "  structured_output_mode: auto\n"
+            "  timeout_seconds: 5\n"
+            "  max_retries: 1\n"
+            "  max_output_tokens: 600\n"
+            "  temperature: 0.2\n"
+            "  repair_attempts: 1\n"
+            "  concurrency_limit: 2\n"
+            "  extra_body: {}\n"
+            "openrouter:\n"
+            "  site_url: null\n"
+            "  app_name: PSVIEW Recruiting Agent\n"
+            "runtime:\n"
+            "  allowed_origins: ['*']\n"
+            "  max_request_body_bytes: 100000\n"
+            "  max_history_messages: 20\n"
+            "  max_conversation_turns: 16\n"
+            "  max_response_characters: 1000\n"
+            "  max_revision_attempts: 1\n"
+            "  langgraph_recursion_limit: 20\n"
+            "retrieval:\n"
+            "  enabled: true\n"
+            "  top_k: 5\n"
+            "  min_score: 0.05\n"
+            "  reuse_penalty: 0.15\n"
+            "  max_fact_candidates: 20\n"
+            "database:\n"
+            "  mongodb_uri: ${MONGODB_URI}\n"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(config))
+    monkeypatch.setenv("MODEL_API_KEY", "key-123")
+    monkeypatch.setenv("MODEL_NAME", "model-123")
+    monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017/test")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(InvalidConfigurationError, match="OpenRouter provider requires an OpenRouter-compatible base URL"):
+        load_settings()
+

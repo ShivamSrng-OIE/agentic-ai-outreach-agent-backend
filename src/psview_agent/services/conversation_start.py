@@ -378,10 +378,8 @@ class ConversationStartService:
             fact=primary_fact,
         )
         intro = sanitize_generated_text(
-            f"Hi {candidate.name}, I noticed your experience {candidate_experience} "
-            "and thought it was worth reaching out. "
-            f"For {company_name}'s {target_role} role, that background seems especially "
-            f"relevant to {role_phrase}. "
+            f"Hi {candidate.name}, I'm {configuration.persona.name}, recruiting for the {target_role} role at {company_name}. "
+            f"I noticed your experience {candidate_experience}, and that background seems especially relevant to {role_phrase}. "
             f"{primary_sentence} "
             "Would you be open to a brief conversation?"
         )
@@ -591,6 +589,7 @@ class ConversationStartService:
                     [
                         candidate.current_role,
                         candidate.background_summary,
+                        candidate.resume_text or "",
                     ]
                 )
             )

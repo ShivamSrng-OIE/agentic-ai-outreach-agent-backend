@@ -6,13 +6,14 @@ import logging
 import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Request, Body
+from fastapi import APIRouter, Depends, Header, Request, Body, UploadFile, File
 from openai import AsyncOpenAI
 
-from psview_agent.api.dependencies import get_agent_configuration_service
+from psview_agent.api.dependencies import get_agent_configuration_service, get_model_gateway
 from psview_agent.domain.api import ConfigureAgentRequest, ConfigureAgentResponse
 from psview_agent.services.agent_configuration import AgentConfigurationService
 from psview_agent.api.routes.conversations import get_client_ip, get_ip_location
+from psview_agent.integrations.models.protocol import ModelGateway
 
 LOGGER = logging.getLogger("psview_agent.api.routes.agents")
 
@@ -128,3 +129,48 @@ async def configure_agent(
             LOGGER.warning(f"Failed to log configure interaction: {err}")
 
     return ConfigureAgentResponse(configuration=configuration)
+
+
+@router.post("/parse-resume")
+async def parse_resume(
+    file: UploadFile = File(...),
+    gateway: ModelGateway = Depends(get_model_gateway),
+) -> dict[str, object]:
+    """Parse a candidate resume (TXT/PDF) and extract details using the AI model."""
+    import io
+    from pypdf import PdfReader
+    
+    content = await file.read()
+    filename = file.filename or ""
+    
+    text = ""
+    if filename.lower().endswith(".pdf"):
+        try:
+            pdf_file = io.BytesIO(content)
+            reader = PdfReader(pdf_file)
+            for page in reader.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        except Exception as exc:
+            LOGGER.error(f"Failed to parse PDF resume: {exc}")
+            return {"status": "error", "message": f"Failed to parse PDF resume: {str(exc)}"}
+    else:
+        try:
+            text = content.decode("utf-8", errors="ignore")
+        except Exception as exc:
+            return {"status": "error", "message": f"Failed to decode text resume: {str(exc)}"}
+            
+    if not text.strip():
+        return {"status": "error", "message": "Extracted resume text is empty"}
+        
+    try:
+        profile = await gateway.extract_profile_from_resume(resume_text=text)
+        return {
+            "status": "success",
+            "text": text,
+            "extracted_profile": profile.model_dump(),
+        }
+    except Exception as exc:
+        LOGGER.error(f"AI parsing of resume failed: {exc}")
+        return {"status": "error", "message": f"AI model failed to parse resume details: {str(exc)}"}

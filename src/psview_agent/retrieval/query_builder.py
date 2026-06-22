@@ -33,6 +33,8 @@ def build_initial_retrieval_query(
     ]
     if target_role_description:
         parts.append(target_role_description)
+    if candidate.resume_text:
+        parts.append(candidate.resume_text)
     text = " ".join(parts)
     return RetrievalQuery(
         text=text,

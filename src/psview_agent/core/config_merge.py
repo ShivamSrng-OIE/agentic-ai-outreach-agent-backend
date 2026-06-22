@@ -46,6 +46,7 @@ ENV_FIELD_MAP: dict[str, tuple[tuple[str, ...], Parser]] = {
     "MODEL_GENERAL_CHAT_NAME": (("model", "general_chat_model_name"), _parse_str),
     "MODEL_STRUCTURED_JSON_NAME": (("model", "structured_json_model_name"), _parse_str),
     "MODEL_CODING_BACKEND_NAME": (("model", "coding_backend_model_name"), _parse_str),
+    "MODEL_RESUME_PARSING_NAME": (("model", "resume_parsing_model_name"), _parse_str),
     "MODEL_STRUCTURED_OUTPUT_MODE": (("model", "structured_output_mode"), _parse_str),
     "MODEL_TIMEOUT_SECONDS": (("model", "timeout_seconds"), _parse_float),
     "MODEL_MAX_RETRIES": (("model", "max_retries"), _parse_int),

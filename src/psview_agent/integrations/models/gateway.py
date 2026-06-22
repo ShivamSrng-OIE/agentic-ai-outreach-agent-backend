@@ -18,7 +18,7 @@ from psview_agent.domain.agent import (
     CompanyAgentConfigurationDraft,
     OutreachPlanDraft,
 )
-from psview_agent.domain.candidate import CandidateProfile
+from psview_agent.domain.candidate import CandidateProfile, ExtractedCandidateProfile
 from psview_agent.domain.company import CompanyContextInput, SourceSegment
 from psview_agent.domain.conversation import ConversationMessage, ConversationState
 from psview_agent.domain.decisions import AgentDecision, AgentDecisionDraft, CandidateAnalysis
@@ -53,6 +53,7 @@ class ModelWorkload(StrEnum):
     GENERAL_CHAT = "general_chat"
     STRUCTURED_JSON = "structured_json"
     CODING_BACKEND = "coding_backend"
+    RESUME_PARSING = "resume_parsing"
 
 
 class _ChatCreateCallable(Protocol):
@@ -275,6 +276,25 @@ class OpenAICompatibleModelGateway(ModelGateway):
         sanitized_draft = sanitize_model_strings(draft)
         return self._normalize_response_fact_ids(draft=sanitized_draft, decision=decision)
 
+    async def extract_profile_from_resume(
+        self,
+        *,
+        resume_text: str,
+    ) -> ExtractedCandidateProfile:
+        system_prompt = (
+            "You are an expert recruitment assistant. Parse the candidate's resume "
+            "and extract their name, their current or most recent job role, and a rich "
+            "professional background summary (between 10 and 1500 characters). Output the result in JSON."
+        )
+        user_prompt = f"Resume Content:\n{resume_text}"
+        return await self._request_structured(
+            output_model=ExtractedCandidateProfile,
+            schema_name="extracted_candidate_profile",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            workload=ModelWorkload.RESUME_PARSING,
+        )
+
     async def _request_structured(
         self,
         *,
@@ -332,12 +352,16 @@ class OpenAICompatibleModelGateway(ModelGateway):
                 return override.general_chat_model_name or override.model_name
             if workload is ModelWorkload.CODING_BACKEND:
                 return override.coding_backend_model_name or override.model_name
+            if workload is ModelWorkload.RESUME_PARSING:
+                return override.resume_parsing_model_name or override.model_name
             return override.structured_json_model_name or override.model_name
 
         if workload is ModelWorkload.GENERAL_CHAT:
             return self._settings.model.general_chat_model_name or self._settings.model.model_name
         if workload is ModelWorkload.CODING_BACKEND:
             return self._settings.model.coding_backend_model_name or self._settings.model.model_name
+        if workload is ModelWorkload.RESUME_PARSING:
+            return self._settings.model.resume_parsing_model_name or self._settings.model.model_name
         return self._settings.model.structured_json_model_name or self._settings.model.model_name
 
     def _mode_attempts(self, model_name: str) -> list[StructuredOutputMode]:

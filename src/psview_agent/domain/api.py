@@ -44,7 +44,7 @@ class StartConversationRequest(StrictModel):
     company_context: CompanyContextInput | None = None
     candidate: CandidateProfile
     target_role: str = Field(min_length=2, max_length=300)
-    target_role_description: str | None = Field(default=None, min_length=10, max_length=4000)
+    target_role_description: str | None = Field(default=None, min_length=10, max_length=50000)
 
     @model_validator(mode="after")
     def validate_configuration_source(self) -> Self:
@@ -62,7 +62,7 @@ class StartConversationResponse(StrictModel):
 
 class ConversationTurnRequest(StrictModel):
     session: ConversationSession
-    candidate_reply: str = Field(min_length=1, max_length=4000)
+    candidate_reply: str = Field(min_length=1, max_length=50000)
 
 
 class ConversationTurnResponse(StrictModel):

@@ -216,3 +216,31 @@ async def test_oversized_request_returns_413_with_request_id(client: AsyncClient
     assert response.status_code == 413
     assert response.headers["X-Request-ID"]
     assert response.json()["code"] == "request_too_large"
+
+
+@pytest.mark.asyncio
+async def test_parse_resume_endpoint_txt(client: AsyncClient) -> None:
+    files = {"file": ("resume.txt", b"Jane Doe\nAI Developer\nBuilding advanced LLM agents.", "text/plain")}
+    response = await client.post(
+        "/api/v1/agents/parse-resume",
+        files=files,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert "Jane Doe" in payload["text"]
+    assert payload["extracted_profile"]["name"] == "Jane Doe"
+    assert payload["extracted_profile"]["current_role"] == "AI Developer"
+
+
+@pytest.mark.asyncio
+async def test_parse_resume_endpoint_pdf_error(client: AsyncClient) -> None:
+    files = {"file": ("resume.pdf", b"corrupt pdf data", "application/pdf")}
+    response = await client.post(
+        "/api/v1/agents/parse-resume",
+        files=files,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "error"
+    assert "Failed to parse PDF resume" in payload["message"]

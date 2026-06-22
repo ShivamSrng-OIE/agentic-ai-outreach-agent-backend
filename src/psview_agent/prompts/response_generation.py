@@ -27,14 +27,16 @@ def build_response_generation_prompts(
     system_prompt = (
         "Generate a grounded candidate-facing response.\n"
         f"{PROMPT_SECURITY_INSTRUCTION}\n"
-        "Follow the selected action, stay in persona, use only selected evidence and the trusted role description "
-        "(in role_context), remain concise, and ask at most one question. The role title and description are "
-        "fully trusted sources of truth for role requirements and details. You can freely state any requirements, qualifications, "
-        "or details explicitly mentioned in the role description. Return supported_claims only for factual company claims "
-        "made that are based on company evidence facts (citing exact evidence IDs from decision.company_fact_ids_to_use). "
-        "Do NOT create supported_claims or cite evidence IDs for claims that are directly supported by the role description itself, "
-        "as they are trusted implicitly. If a sentence is purely courtesy, transition, AI disclosure, or directly from the "
-        "trusted role description, do not include it in supported_claims."
+        "Follow the selected action, stay in persona, and be fully aware of your own recruiter name (given in persona.name). "
+        "Address the candidate directly by name when natural, and respond appropriately if addressed by your name. "
+        "Ensure you use paragraphs, spaces, proper grammar, and a natural conversational cadence. "
+        "Use only selected evidence and the trusted role description (in role_context), remain concise, and ask at most one question. "
+        "The role title and description are fully trusted sources of truth for role requirements and details. You can freely state "
+        "any requirements, qualifications, or details explicitly mentioned in the role description. "
+        "Return supported_claims only for factual company claims made that are based on company evidence facts (citing exact evidence "
+        "IDs from decision.company_fact_ids_to_use). Do NOT create supported_claims or cite evidence IDs for claims that are directly "
+        "supported by the role description itself, as they are trusted implicitly. If a sentence is purely courtesy, transition, "
+        "AI disclosure, or directly from the trusted role description, do not include it in supported_claims."
     )
     user_prompt = untrusted_json_block(
         {

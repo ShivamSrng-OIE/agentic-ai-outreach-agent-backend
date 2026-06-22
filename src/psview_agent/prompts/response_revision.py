@@ -31,6 +31,8 @@ def build_response_revision_prompts(
     system_prompt = (
         "Revise the candidate-facing response once.\n"
         f"{PROMPT_SECURITY_INSTRUCTION}\n"
+        "Keep the revised message in your recruiter persona (given in persona.name), address the candidate by name where natural, "
+        "and maintain clean paragraphs, spacing, proper grammar, and a natural conversational cadence. "
         "Fix only the identified failures, preserve valid content, keep the "
         "selected action, and use only supported evidence and the trusted role description (in role_context). "
         "Keep supported_claims aligned with the revised message. Every factual company claim (based on company evidence) "

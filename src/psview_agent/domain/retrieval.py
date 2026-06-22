@@ -10,9 +10,9 @@ from psview_agent.utils.text import remove_empty_strings
 
 
 class RetrievalQuery(StrictModel):
-    text: str = Field(min_length=2, max_length=4000)
+    text: str = Field(min_length=2, max_length=50000)
     target_role: str = Field(min_length=2, max_length=300)
-    target_role_description: str | None = Field(default=None, min_length=10, max_length=4000)
+    target_role_description: str | None = Field(default=None, min_length=10, max_length=50000)
     topics: list[str] = Field(default_factory=list, max_length=12)
     action: AgentAction | None = None
 

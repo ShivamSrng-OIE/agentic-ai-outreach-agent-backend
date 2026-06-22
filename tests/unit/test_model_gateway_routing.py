@@ -39,6 +39,7 @@ def _settings() -> Settings:
     model_payload["general_chat_model_name"] = "google/gemma-4-31b-it:free"
     model_payload["structured_json_model_name"] = "nex-agi/nex-n2-pro:free"
     model_payload["coding_backend_model_name"] = "cohere/north-mini-code:free"
+    model_payload["resume_parsing_model_name"] = "meta-llama/llama-3-8b-instruct:free"
     return Settings.model_validate(payload)
 
 
@@ -106,6 +107,9 @@ def test_gateway_resolves_named_models_by_workload() -> None:
     assert gateway._resolve_model_name(ModelWorkload.STRUCTURED_JSON) == ("nex-agi/nex-n2-pro:free")
     assert gateway._resolve_model_name(ModelWorkload.CODING_BACKEND) == (
         "cohere/north-mini-code:free"
+    )
+    assert gateway._resolve_model_name(ModelWorkload.RESUME_PARSING) == (
+        "meta-llama/llama-3-8b-instruct:free"
     )
 
 

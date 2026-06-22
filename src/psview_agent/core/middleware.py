@@ -74,6 +74,7 @@ class ModelOverrideMiddleware(BaseHTTPMiddleware):
         general_chat_model_name = request.headers.get("X-Model-General-Chat-Name")
         structured_json_model_name = request.headers.get("X-Model-Structured-Json-Name")
         coding_backend_model_name = request.headers.get("X-Model-Coding-Backend-Name")
+        resume_parsing_model_name = request.headers.get("X-Model-Resume-Parsing-Name")
 
         token = None
         if provider and model_name and api_key:
@@ -86,6 +87,7 @@ class ModelOverrideMiddleware(BaseHTTPMiddleware):
                     general_chat_model_name=general_chat_model_name,
                     structured_json_model_name=structured_json_model_name,
                     coding_backend_model_name=coding_backend_model_name,
+                    resume_parsing_model_name=resume_parsing_model_name,
                 )
                 token = model_override_var.set(override)
             except Exception as e:

@@ -80,7 +80,7 @@ class ConversationSession(StrictModel):
     configuration: AgentConfiguration
     candidate: CandidateProfile
     target_role: str = Field(min_length=2, max_length=300)
-    target_role_description: str | None = Field(default=None, min_length=10, max_length=4000)
+    target_role_description: str | None = Field(default=None, min_length=10, max_length=50000)
     outreach_plan: OutreachPlan
     state: ConversationState
     messages: list[ConversationMessage] = Field(min_length=1)

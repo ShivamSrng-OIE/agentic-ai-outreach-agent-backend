@@ -250,9 +250,10 @@ async def test_model_override_middleware(client: AsyncClient, app) -> None:
         override = model_override_var.get()
         if override:
             return {
-                "provider": override.provider.value,
+                "provider": override.provider.value if override.provider else None,
                 "model_name": override.model_name,
-                "api_key": override.api_key
+                "api_key": override.api_key,
+                "resume_parsing_model_name": override.resume_parsing_model_name,
             }
         return {"override": None}
         
@@ -260,7 +261,8 @@ async def test_model_override_middleware(client: AsyncClient, app) -> None:
     headers = {
         "X-Model-Provider": "gemini",
         "X-Model-Name": "gemini-2.5-flash",
-        "X-Model-Api-Key": "my-gemini-key"
+        "X-Model-Api-Key": "my-gemini-key",
+        "X-Model-Resume-Parsing-Name": "openai/gpt-4o-mini",
     }
     
     resp = await client.get("/api/test-context-override", headers=headers)
@@ -268,13 +270,23 @@ async def test_model_override_middleware(client: AsyncClient, app) -> None:
     assert resp.json() == {
         "provider": "gemini",
         "model_name": "gemini-2.5-flash",
-        "api_key": "my-gemini-key"
+        "api_key": "my-gemini-key",
+        "resume_parsing_model_name": "openai/gpt-4o-mini",
     }
     
+    # Send request with invalid provider to trigger ValidationError handler
+    invalid_headers = {
+        "X-Model-Provider": "invalid-provider-name",
+    }
+    resp_invalid = await client.get("/api/test-context-override", headers=invalid_headers)
+    assert resp_invalid.status_code == 200
+    assert resp_invalid.json() == {"override": None}
+
     # Send request without headers
     resp_no_headers = await client.get("/api/test-context-override")
     assert resp_no_headers.status_code == 200
     assert resp_no_headers.json() == {"override": None}
+
 
 
 @pytest.mark.anyio
